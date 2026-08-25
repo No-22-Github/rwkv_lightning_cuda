@@ -714,7 +714,7 @@ Json::Value build_status_response(
   Json::Value resp;
   resp["status"] = "running";
   resp["api_version"] = "1.0";
-  resp["engine_version"] = "albatross-1.0.2";
+  resp["engine_version"] = "albatross-1.1.0";
   resp["model"]["id"] = engine.model_name();
   resp["model"]["name"] = engine.model_name();
   resp["model"]["path"] = engine.model()->model_path();

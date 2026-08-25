@@ -16,6 +16,11 @@ cmake -S . -B ./build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CUDA_ARCHITECTURES="75;
 cmake --build ./build --config Release -j --target bundle_rwkv_lighting_cuda
 ```
 
+AMD ROCm
+```bash
+cmake -S . -B build-hip -DRWKV_GPU_BACKEND=HIP -DCMAKE_BUILD_TYPE=Release
+cmake --build build-hip -j
+```
 Compile Go Web Frontend
 
 ```bash
