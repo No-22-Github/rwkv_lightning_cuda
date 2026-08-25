@@ -25,3 +25,6 @@ third_party/
 # Launcher binaries
 RWKV_Lightning_CUDA_Launcher/rwkv_launcher
 RWKV_Lightning_CUDA_Launcher/rwkv_launcher.exe
+
+RWKV_Lightning_CUDA_router/rwkv_router
+RWKV_Lightning_CUDA_router/rwkv_router.exe

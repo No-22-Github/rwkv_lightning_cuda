@@ -1,0 +1,23 @@
+# The address exposed by the router. Use 0.0.0.0 to accept LAN traffic.
+listen = "0.0.0.0:8080"
+
+# 0 means no router-enforced body limit. The backend still validates its own limits.
+max_request_body_bytes = 16777216
+
+# Non-streaming and SSE requests are both kept open until the upstream finishes.
+# 0 disables the total request timeout (recommended when clients use long generations).
+request_timeout_seconds = 0
+
+# After an upstream connection/transport failure, temporarily avoid that endpoint.
+failure_cooldown_seconds = 5
+
+[[backends]]
+name = "gpu-a"
+url = "http://192.168.1.21:8000"
+# Relative throughput/capacity. A value of 2 receives roughly twice the active bsz.
+weight = 1
+
+[[backends]]
+name = "gpu-b"
+url = "http://192.168.1.22:8000"
+weight = 1
