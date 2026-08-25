@@ -7,7 +7,7 @@
 #include <sstream>
 #include <stdexcept>
 
-#include <cuda_runtime.h>
+#include "rwkv_gpu_runtime.hpp"
 
 namespace rwkv7_server {
 namespace {

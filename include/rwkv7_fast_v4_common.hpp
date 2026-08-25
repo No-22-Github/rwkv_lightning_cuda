@@ -12,8 +12,7 @@
 #include <utility>
 #include <vector>
 
-#include <cuda_fp16.h>
-#include <cuda_runtime.h>
+#include "rwkv_gpu_runtime.hpp"
 
 #include "pth_archive.hpp"
 #include "pth_tensor.hpp"
@@ -60,6 +59,12 @@ inline void check_cuda(cudaError_t err, const char* what) {
     std::exit(1);
   }
 }
+
+#ifdef RWKV_USE_HIP
+inline void check_hip(hipError_t err, const char* what) {
+  check_cuda(err, what);
+}
+#endif
 
 template <typename T>
 struct DeviceBuffer {

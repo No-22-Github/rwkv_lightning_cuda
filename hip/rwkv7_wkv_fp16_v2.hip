@@ -1,0 +1,686 @@
+#undef __HIP_NO_HALF2_OPERATORS__
+#undef __HIP_NO_HALF_CONVERSIONS__
+#undef __HIP_NO_HALF_OPERATORS__
+
+#include <assert.h>
+
+#include <hip/hip_fp16.h>
+#include <hip/hip_runtime.h>
+#include <stdint.h>
+
+#include "rwkv7_fast_v4_kernels.hip.hpp"
+
+namespace {
+
+constexpr int N = 64;
+constexpr int HALF2_N = N / 2;
+constexpr float TWO_NEG_41 = 4.547473508864641e-13f;
+constexpr float NEXP_HALF_LOG2_E = -0.8750387749145276f;
+constexpr float NLOG2_E = -1.4426950408889634f;
+constexpr uint32_t ROT1 = 2654435769u;
+using F = half;
+#define CLONE_N 64
+
+#if 0
+using rwkv_async_pipeline_t = hip::pipeline<hip::thread_scope_thread>;
+#define RWKV_ASYNC_PIPE_TAIL_DECL , rwkv_async_pipeline_t& pipe
+#define RWKV_ASYNC_PIPE_TAIL_PASS , pipe
+#define RWKV_ASYNC_PIPE_DECL rwkv_async_pipeline_t& pipe
+#define RWKV_ASYNC_PIPE_PASS pipe
+#define RWKV_ASYNC_PIPE_INIT auto pipe = hip::make_pipeline();
+#else
+struct rwkv_async_pipeline_t {};
+#define RWKV_ASYNC_PIPE_TAIL_DECL
+#define RWKV_ASYNC_PIPE_TAIL_PASS
+#define RWKV_ASYNC_PIPE_DECL
+#define RWKV_ASYNC_PIPE_PASS
+#define RWKV_ASYNC_PIPE_INIT
+#endif
+
+__device__ __forceinline__ float rotator1(int x) {
+  const uint32_t bits = ROT1 * static_cast<uint32_t>(x);
+  return TWO_NEG_41 * static_cast<float>(static_cast<int32_t>(bits));
+}
+
+__device__ __forceinline__ half w_delta(half w_raw, const half* __restrict__ w0_ptr, int c, int phase) {
+  float w = __half2float(w_raw);
+  if (w0_ptr) {
+    w += __half2float(w0_ptr[c]);
+  }
+  float d = exp2f(NEXP_HALF_LOG2_E / (1.0f + exp2f(NLOG2_E * w))) - 1.0f + rotator1(phase);
+  return __float2half_rn(d);
+}
+
+// State is physically [B,H,K,V]. Each thread owns one V column and packs two
+// adjacent K entries in a half2 register. Across a warp, each scalar load/store
+// is contiguous in V.
+__device__ __forceinline__ half2 load_state_kv(
+    const half* __restrict__ state_base, int v, int k2) {
+  return __halves2half2(
+      __ldg(state_base + (2 * k2) * N + v),
+      __ldg(state_base + (2 * k2 + 1) * N + v));
+}
+
+__device__ __forceinline__ void store_state_kv(
+    half* __restrict__ state_base, int v, int k2, half2 value) {
+  state_base[(2 * k2) * N + v] = value.x;
+  state_base[(2 * k2 + 1) * N + v] = value.y;
+}
+
+template <int Bytes>
+__device__ __forceinline__ void clone_cp_async(
+    void const* smem_addr,
+    void const* global_ptr,
+    bool cond
+    RWKV_ASYNC_PIPE_TAIL_DECL) {
+  static_assert(Bytes == 16 || Bytes == 8 || Bytes == 4);
+  if (cond) {
+    if constexpr (Bytes == 16) {
+      *reinterpret_cast<int4*>(const_cast<void*>(smem_addr)) = *reinterpret_cast<const int4*>(global_ptr);
+    } else if constexpr (Bytes == 8) {
+      *reinterpret_cast<int2*>(const_cast<void*>(smem_addr)) = *reinterpret_cast<const int2*>(global_ptr);
+    } else {
+      *reinterpret_cast<int*>(const_cast<void*>(smem_addr)) = *reinterpret_cast<const int*>(global_ptr);
+    }
+  } else {
+    if constexpr (Bytes == 16) {
+      *reinterpret_cast<int4*>(const_cast<void*>(smem_addr)) = make_int4(0, 0, 0, 0);
+    } else if constexpr (Bytes == 8) {
+      *reinterpret_cast<int2*>(const_cast<void*>(smem_addr)) = make_int2(0, 0);
+    } else {
+      *reinterpret_cast<int*>(const_cast<void*>(smem_addr)) = 0;
+    }
+  }
+}
+
+template <int NWait>
+__device__ __forceinline__ void clone_cp_wait(RWKV_ASYNC_PIPE_DECL) {
+  (void)NWait;
+}
+
+__device__ __forceinline__ void clone_cp_commit(RWKV_ASYNC_PIPE_DECL) {
+}
+
+template <bool Tis1 = false>
+__global__ void __launch_bounds__(CLONE_N, 2) wkv_fp16_v1_clone_kernel(
+    const int B,
+    const int T,
+    const int C,
+    const int H,
+    F* __restrict__ state_ptr,
+    const F* __restrict__ r_ptr,
+    const F* __restrict__ w_ptr,
+    const F* __restrict__ w0_ptr,
+    const F* __restrict__ k_ptr,
+    const F* __restrict__ v_ptr,
+    const F* __restrict__ a_ptr,
+    const F* __restrict__ b_ptr,
+    F* __restrict__ y_ptr,
+    const int* __restrict__ elapsed_t) {
+  if constexpr (Tis1) {
+    __builtin_assume(T == 1);
+  }
+  const int b = blockIdx.x / H;
+  const int h = blockIdx.x % H;
+  const int i = threadIdx.x;
+  const int lane = i % 32;
+
+  RWKV_ASYNC_PIPE_INIT
+
+  state_ptr += static_cast<int64_t>(b) * C * CLONE_N + h * CLONE_N * CLONE_N;
+
+  half2 state[CLONE_N / 2];
+#pragma unroll
+  for (int j = 0; j < CLONE_N / 2; j++) {
+    state[j] = load_state_kv(state_ptr, i, j);
+  }
+
+  __shared__ __align__(128) half2 r[CLONE_N / 2], k[CLONE_N / 2], w[CLONE_N / 2], a[CLONE_N / 2], bvec[CLONE_N / 2], bvec_dummy[CLONE_N / 2];
+#pragma unroll
+  for (int tt = 0; tt < T; tt++) {
+    int t = b * T * C + h * CLONE_N + tt * C;
+    __syncthreads();
+    clone_cp_async<4>((half2*)(i < 32 ? w : a) + lane, (half2*)((i < 32 ? w_ptr : a_ptr) + t) + lane, true RWKV_ASYNC_PIPE_TAIL_PASS);
+    clone_cp_commit(RWKV_ASYNC_PIPE_PASS);
+    clone_cp_async<4>((half2*)(i < 32 ? r : k) + lane, (half2*)((i < 32 ? r_ptr : k_ptr) + t) + lane, true RWKV_ASYNC_PIPE_TAIL_PASS);
+    // A predicated-off cp.async zero-fills its destination. Warp 1 must use a
+    // disjoint target or it races warp 0's real bvec copy.
+    clone_cp_async<4>((i < 32 ? bvec : bvec_dummy) + lane, (half2*)(b_ptr + t) + lane, i < 32 RWKV_ASYNC_PIPE_TAIL_PASS);
+    clone_cp_commit(RWKV_ASYNC_PIPE_PASS);
+
+    half vv = v_ptr[t + i];
+    half2 vv2 = {vv, vv};
+    half2 y2 = {0.0, 0.0};
+    half2 sa2 = {0.0, 0.0};
+    clone_cp_wait<1>(RWKV_ASYNC_PIPE_PASS);
+    __syncthreads();
+#pragma unroll
+    for (int j = 0; j < CLONE_N / 2; j++) {
+      sa2 = __hfma2(a[j], state[j], sa2);
+    }
+    half sa = sa2.x + sa2.y;
+    sa2 = __halves2half2(sa, sa);
+    ((F*)w)[i] = w_delta(((F*)w)[i], w0_ptr, h * CLONE_N + i, elapsed_t[b] + h * CLONE_N + i + tt);
+
+    clone_cp_wait<0>(RWKV_ASYNC_PIPE_PASS);
+    __syncthreads();
+#pragma unroll
+    for (int j = 0; j < CLONE_N / 2; j++) {
+      half2& s = state[j];
+      s = __hfma2(s, w[j], __hfma2(k[j], vv2, __hfma2(sa2, bvec[j], s)));
+      y2 = __hfma2(s, r[j], y2);
+    }
+    y_ptr[t + i] = y2.x + y2.y;
+  }
+
+#pragma unroll
+  for (int j = 0; j < CLONE_N / 2; j++) {
+    store_state_kv(state_ptr, i, j, state[j]);
+  }
+}
+
+template <int Bytes>
+__device__ __forceinline__ void cp_async(
+    void* smem,
+    const void* global,
+    bool pred
+    RWKV_ASYNC_PIPE_TAIL_DECL) {
+  static_assert(Bytes == 16 || Bytes == 8 || Bytes == 4);
+  if (pred) {
+    if constexpr (Bytes == 16) {
+      *reinterpret_cast<int4*>(smem) = *reinterpret_cast<const int4*>(global);
+    } else if constexpr (Bytes == 8) {
+      *reinterpret_cast<int2*>(smem) = *reinterpret_cast<const int2*>(global);
+    } else {
+      *reinterpret_cast<int*>(smem) = *reinterpret_cast<const int*>(global);
+    }
+  } else {
+    if constexpr (Bytes == 16) {
+      *reinterpret_cast<int4*>(smem) = make_int4(0, 0, 0, 0);
+    } else if constexpr (Bytes == 8) {
+      *reinterpret_cast<int2*>(smem) = make_int2(0, 0);
+    } else {
+      *reinterpret_cast<int*>(smem) = 0;
+    }
+  }
+}
+
+__device__ __forceinline__ void cp_commit(RWKV_ASYNC_PIPE_DECL) {
+}
+
+template <int NWait>
+__device__ __forceinline__ void cp_wait(RWKV_ASYNC_PIPE_DECL) {
+  (void)NWait;
+}
+
+__device__ __forceinline__ void prefetch_token(
+    int tid,
+    int lane,
+    int token,
+    half2* r,
+    half2* w,
+    half2* k,
+    half2* a,
+    half2* b,
+    half2* b_dummy,
+    const half* r_ptr,
+    const half* w_ptr,
+    const half* k_ptr,
+    const half* a_ptr,
+    const half* b_ptr
+    RWKV_ASYNC_PIPE_TAIL_DECL) {
+  cp_async<4>((tid < 32 ? w : a) + lane, (const half2*)(tid < 32 ? w_ptr + token : a_ptr + token) + lane, true RWKV_ASYNC_PIPE_TAIL_PASS);
+  cp_commit(RWKV_ASYNC_PIPE_PASS);
+  cp_async<4>((tid < 32 ? r : k) + lane, (const half2*)(tid < 32 ? r_ptr + token : k_ptr + token) + lane, true RWKV_ASYNC_PIPE_TAIL_PASS);
+  // Keep predicated zero-fill writes away from the live b vector.
+  cp_async<4>((tid < 32 ? b : b_dummy) + lane, (const half2*)(b_ptr + token) + lane, tid < 32 RWKV_ASYNC_PIPE_TAIL_PASS);
+  cp_commit(RWKV_ASYNC_PIPE_PASS);
+}
+
+template <bool Tis1 = false>
+__global__ __launch_bounds__(N, 2) void wkv_fp16_v1_exact_kernel(
+    const int B,
+    const int T,
+    const int C,
+    const int H,
+    half* __restrict__ state_ptr,
+    const half* __restrict__ r_ptr,
+    const half* __restrict__ w_ptr,
+    const half* __restrict__ w0_ptr,
+    const half* __restrict__ k_ptr,
+    const half* __restrict__ v_ptr,
+    const half* __restrict__ a_ptr,
+    const half* __restrict__ b_ptr,
+    half* __restrict__ y_ptr,
+    const int* __restrict__ elapsed_t) {
+  if constexpr (Tis1) {
+    __builtin_assume(T == 1);
+  }
+  const int b_id = blockIdx.x / H;
+  const int h = blockIdx.x % H;
+  const int i = threadIdx.x;
+  const int lane = i % 32;
+
+  RWKV_ASYNC_PIPE_INIT
+  state_ptr += static_cast<int64_t>(b_id) * C * N + h * N * N;
+
+  half2 state[HALF2_N];
+#pragma unroll
+  for (int j = 0; j < HALF2_N; j++) {
+    state[j] = load_state_kv(state_ptr, i, j);
+  }
+
+  __shared__ __align__(128) half2 r[HALF2_N], k[HALF2_N], w[HALF2_N], a[HALF2_N], bvec[HALF2_N], bvec_dummy[HALF2_N];
+#pragma unroll
+  for (int tt = 0; tt < T; tt++) {
+    int t = b_id * T * C + h * N + tt * C;
+    __syncthreads();
+    cp_async<4>((half2*)(i < 32 ? w : a) + lane, (half2*)((i < 32 ? w_ptr : a_ptr) + t) + lane, true RWKV_ASYNC_PIPE_TAIL_PASS);
+    cp_commit(RWKV_ASYNC_PIPE_PASS);
+    cp_async<4>((half2*)(i < 32 ? r : k) + lane, (half2*)((i < 32 ? r_ptr : k_ptr) + t) + lane, true RWKV_ASYNC_PIPE_TAIL_PASS);
+    cp_async<4>((i < 32 ? bvec : bvec_dummy) + lane, (half2*)(b_ptr + t) + lane, i < 32 RWKV_ASYNC_PIPE_TAIL_PASS);
+    cp_commit(RWKV_ASYNC_PIPE_PASS);
+
+    half vv = v_ptr[t + i];
+    half2 vv2 = {vv, vv};
+    half2 y2 = {0.0, 0.0};
+    half2 sa2 = {0.0, 0.0};
+    cp_wait<1>(RWKV_ASYNC_PIPE_PASS);
+    __syncthreads();
+#pragma unroll
+    for (int j = 0; j < HALF2_N; j++) {
+      sa2 = __hfma2(a[j], state[j], sa2);
+    }
+    half sa = sa2.x + sa2.y;
+    sa2 = __halves2half2(sa, sa);
+    ((half*)w)[i] = w_delta(((half*)w)[i], w0_ptr, h * N + i, elapsed_t[b_id] + h * N + i + tt);
+
+    cp_wait<0>(RWKV_ASYNC_PIPE_PASS);
+    __syncthreads();
+#pragma unroll
+    for (int j = 0; j < HALF2_N; j++) {
+      half2& s = state[j];
+      s = __hfma2(s, w[j], __hfma2(k[j], vv2, __hfma2(sa2, bvec[j], s)));
+      y2 = __hfma2(s, r[j], y2);
+    }
+    y_ptr[t + i] = y2.x + y2.y;
+  }
+
+#pragma unroll
+  for (int j = 0; j < HALF2_N; j++) {
+    store_state_kv(state_ptr, i, j, state[j]);
+  }
+}
+
+__global__ __launch_bounds__(N, 2) void wkv_fp16_seq_v2_kernel(
+    int T,
+    int C,
+    int H,
+    half* __restrict__ state_ptr,
+    const half* __restrict__ r_ptr,
+    const half* __restrict__ w_ptr,
+    const half* __restrict__ w0_ptr,
+    const half* __restrict__ k_ptr,
+    const half* __restrict__ v_ptr,
+    const half* __restrict__ a_ptr,
+    const half* __restrict__ b_ptr,
+    half* __restrict__ y_ptr,
+    const int* __restrict__ elapsed_t) {
+  const int bh = blockIdx.x;
+  const int b_id = bh / H;
+  const int h = bh - b_id * H;
+  const int i = threadIdx.x;
+  const int lane = i & 31;
+
+  RWKV_ASYNC_PIPE_INIT
+  state_ptr += static_cast<int64_t>(b_id) * C * N + h * N * N;
+
+  half2 state[HALF2_N];
+#pragma unroll
+  for (int j = 0; j < HALF2_N; ++j) {
+    state[j] = load_state_kv(state_ptr, i, j);
+  }
+
+  __shared__ __align__(128) half2 r[2][HALF2_N], w[2][HALF2_N], k[2][HALF2_N], a[2][HALF2_N], bvec[2][HALF2_N], bvec_dummy[HALF2_N];
+  int token = (b_id * T) * C + h * N;
+  prefetch_token(i, lane, token, r[0], w[0], k[0], a[0], bvec[0], bvec_dummy, r_ptr, w_ptr, k_ptr, a_ptr, b_ptr RWKV_ASYNC_PIPE_TAIL_PASS);
+
+  for (int tt = 0; tt < T; ++tt) {
+    const int cur = tt & 1;
+    cp_wait<0>(RWKV_ASYNC_PIPE_PASS);
+    __syncthreads();
+
+    half2 sa2 = {0.0f, 0.0f};
+#pragma unroll
+    for (int j = 0; j < HALF2_N; ++j) {
+      sa2 = __hfma2(a[cur][j], state[j], sa2);
+    }
+    half sa = sa2.x + sa2.y;
+    sa2 = __halves2half2(sa, sa);
+    ((half*)w[cur])[i] = w_delta(((half*)w[cur])[i], w0_ptr, h * N + i, elapsed_t[b_id] + h * N + i + tt);
+    __syncthreads();
+
+    if (tt + 1 < T) {
+      int next_token = token + C;
+      prefetch_token(i, lane, next_token, r[cur ^ 1], w[cur ^ 1], k[cur ^ 1], a[cur ^ 1], bvec[cur ^ 1], bvec_dummy, r_ptr, w_ptr, k_ptr, a_ptr, b_ptr RWKV_ASYNC_PIPE_TAIL_PASS);
+    }
+
+    half vv = v_ptr[token + i];
+    half2 vv2 = {vv, vv};
+    half2 y2 = {0.0f, 0.0f};
+#pragma unroll
+    for (int j = 0; j < HALF2_N; ++j) {
+      half2 s = state[j];
+      s = __hfma2(s, w[cur][j], __hfma2(k[cur][j], vv2, __hfma2(sa2, bvec[cur][j], s)));
+      state[j] = s;
+      y2 = __hfma2(s, r[cur][j], y2);
+    }
+    y_ptr[token + i] = y2.x + y2.y;
+    token += C;
+  }
+
+#pragma unroll
+  for (int j = 0; j < HALF2_N; ++j) {
+    store_state_kv(state_ptr, i, j, state[j]);
+  }
+}
+
+__global__ __launch_bounds__(N, 1) void wkv_fp16_one_direct_kernel(
+    int C,
+    int H,
+    half* __restrict__ state_ptr,
+    const half* __restrict__ r_ptr,
+    const half* __restrict__ w_ptr,
+    const half* __restrict__ w0_ptr,
+    const half* __restrict__ k_ptr,
+    const half* __restrict__ v_ptr,
+    const half* __restrict__ a_ptr,
+    const half* __restrict__ b_ptr,
+    half* __restrict__ y_ptr,
+    const int* __restrict__ elapsed_t) {
+  const int bh = blockIdx.x;
+  const int b_id = bh / H;
+  const int h = bh - b_id * H;
+  const int i = threadIdx.x;
+
+  RWKV_ASYNC_PIPE_INIT
+  half* state_base = state_ptr + static_cast<int64_t>(b_id) * C * N + h * N * N;
+
+  half2 state[HALF2_N];
+#pragma unroll
+  for (int j = 0; j < HALF2_N; ++j) {
+    state[j] = load_state_kv(state_base, i, j);
+  }
+
+  __shared__ __align__(128) half2 r[HALF2_N], w[HALF2_N], k[HALF2_N], a[HALF2_N], bvec[HALF2_N];
+  const int token = b_id * C + h * N;
+  if (i < HALF2_N) {
+    const int idx2 = (token >> 1) + i;
+    r[i] = __ldg(reinterpret_cast<const half2*>(r_ptr) + idx2);
+    w[i] = __ldg(reinterpret_cast<const half2*>(w_ptr) + idx2);
+    k[i] = __ldg(reinterpret_cast<const half2*>(k_ptr) + idx2);
+    a[i] = __ldg(reinterpret_cast<const half2*>(a_ptr) + idx2);
+    bvec[i] = __ldg(reinterpret_cast<const half2*>(b_ptr) + idx2);
+  }
+  __syncthreads();
+
+  half2 sa2 = {0.0f, 0.0f};
+#pragma unroll
+  for (int j = 0; j < HALF2_N; ++j) {
+    sa2 = __hfma2(a[j], state[j], sa2);
+  }
+  half sa = sa2.x + sa2.y;
+  sa2 = __halves2half2(sa, sa);
+  ((half*)w)[i] = w_delta(((half*)w)[i], w0_ptr, h * N + i, elapsed_t[b_id] + h * N + i);
+  __syncthreads();
+
+  half vv = __ldg(v_ptr + token + i);
+  half2 vv2 = {vv, vv};
+  half2 y2 = {0.0f, 0.0f};
+#pragma unroll
+  for (int j = 0; j < HALF2_N; ++j) {
+    half2 s = state[j];
+    s = __hfma2(s, w[j], __hfma2(k[j], vv2, __hfma2(sa2, bvec[j], s)));
+    state[j] = s;
+    y2 = __hfma2(s, r[j], y2);
+  }
+  y_ptr[token + i] = y2.x + y2.y;
+
+#pragma unroll
+  for (int j = 0; j < HALF2_N; ++j) {
+    store_state_kv(state_base, i, j, state[j]);
+  }
+}
+
+__global__ __launch_bounds__(N, 1) void wkv_fp16_one_cp_kernel(
+    int C,
+    int H,
+    half* __restrict__ state_ptr,
+    const half* __restrict__ r_ptr,
+    const half* __restrict__ w_ptr,
+    const half* __restrict__ w0_ptr,
+    const half* __restrict__ k_ptr,
+    const half* __restrict__ v_ptr,
+    const half* __restrict__ a_ptr,
+    const half* __restrict__ b_ptr,
+    half* __restrict__ y_ptr,
+    const int* __restrict__ elapsed_t) {
+  const int bh = blockIdx.x;
+  const int b_id = bh / H;
+  const int h = bh - b_id * H;
+  const int i = threadIdx.x;
+  const int lane = i & 31;
+
+  RWKV_ASYNC_PIPE_INIT
+  half* state_base = state_ptr + static_cast<int64_t>(b_id) * C * N + h * N * N;
+
+  half2 state[HALF2_N];
+#pragma unroll
+  for (int j = 0; j < HALF2_N; ++j) {
+    state[j] = load_state_kv(state_base, i, j);
+  }
+
+  __shared__ __align__(128) half2 r[HALF2_N], w[HALF2_N], k[HALF2_N], a[HALF2_N], bvec[HALF2_N], bvec_dummy[HALF2_N];
+  const int token = b_id * C + h * N;
+  cp_async<4>((half2*)(i < 32 ? w : a) + lane, (half2*)((i < 32 ? w_ptr : a_ptr) + token) + lane, true RWKV_ASYNC_PIPE_TAIL_PASS);
+  cp_commit(RWKV_ASYNC_PIPE_PASS);
+  cp_async<4>((half2*)(i < 32 ? r : k) + lane, (half2*)((i < 32 ? r_ptr : k_ptr) + token) + lane, true RWKV_ASYNC_PIPE_TAIL_PASS);
+  cp_async<4>((i < 32 ? bvec : bvec_dummy) + lane, (half2*)(b_ptr + token) + lane, i < 32 RWKV_ASYNC_PIPE_TAIL_PASS);
+  cp_commit(RWKV_ASYNC_PIPE_PASS);
+
+  half vv = __ldg(v_ptr + token + i);
+  half2 vv2 = {vv, vv};
+  half2 sa2 = {0.0f, 0.0f};
+  cp_wait<1>(RWKV_ASYNC_PIPE_PASS);
+  __syncthreads();
+#pragma unroll
+  for (int j = 0; j < HALF2_N; ++j) {
+    sa2 = __hfma2(a[j], state[j], sa2);
+  }
+  half sa = sa2.x + sa2.y;
+  sa2 = __halves2half2(sa, sa);
+  ((half*)w)[i] = w_delta(((half*)w)[i], w0_ptr, h * N + i, elapsed_t[b_id] + h * N + i);
+
+  cp_wait<0>(RWKV_ASYNC_PIPE_PASS);
+  __syncthreads();
+  half2 y2 = {0.0f, 0.0f};
+#pragma unroll
+  for (int j = 0; j < HALF2_N; ++j) {
+    half2 s = state[j];
+    s = __hfma2(s, w[j], __hfma2(k[j], vv2, __hfma2(sa2, bvec[j], s)));
+    state[j] = s;
+    y2 = __hfma2(s, r[j], y2);
+  }
+  y_ptr[token + i] = y2.x + y2.y;
+
+#pragma unroll
+  for (int j = 0; j < HALF2_N; ++j) {
+    store_state_kv(state_base, i, j, state[j]);
+  }
+}
+
+bool use_v2_seq(int B, int T) {
+  return (B == 1 && T >= 8) ||
+         (B == 4 && T >= 4) ||
+         (B == 8 && T >= 8) ||
+         (B == 64 && T == 1) ||
+         (B == 128 && T == 1);
+}
+
+}  // namespace
+
+void rwkv7_wkv_fp16_seq_launch(
+    hipStream_t stream,
+    int B,
+    int T,
+    int C,
+    int H,
+    half* state,
+    const half* r,
+    const half* w,
+    const half* k,
+    const half* v,
+    const half* a,
+    const half* b,
+    half* y,
+    const int* elapsed_t) {
+  assert(C == H * N);
+  if (T == 1) {
+    rwkv7_wkv_fp16_one_launch(stream, B, C, H, state, r, w, k, v, a, b, y, elapsed_t);
+    return;
+  }
+  if (use_v2_seq(B, T)) {
+    wkv_fp16_seq_v2_kernel<<<dim3(B * H), dim3(N), 0, stream>>>(
+        T,
+        C,
+        H,
+        state, r, w, nullptr, k, v, a, b, y, elapsed_t);
+  } else {
+    wkv_fp16_v1_exact_kernel<<<dim3(B * H), dim3(N), 0, stream>>>(
+        B,
+        T,
+        C,
+        H,
+        state, r, w, nullptr, k, v, a, b, y, elapsed_t);
+  }
+}
+
+void rwkv7_wkv_fp16_one_w0_launch(
+    hipStream_t stream,
+    int B,
+    int C,
+    int H,
+    half* state,
+    const half* r,
+    const half* w,
+    const half* w0,
+    const half* k,
+    const half* v,
+    const half* a,
+    const half* b,
+    half* y,
+    const int* elapsed_t);
+
+void rwkv7_wkv_fp16_seq_w0_launch(
+    hipStream_t stream,
+    int B,
+    int T,
+    int C,
+    int H,
+    half* state,
+    const half* r,
+    const half* w,
+    const half* w0,
+    const half* k,
+    const half* v,
+    const half* a,
+    const half* b,
+    half* y,
+    const int* elapsed_t) {
+  assert(C == H * N);
+  assert(T >= 1);
+  if (T == 1) {
+    rwkv7_wkv_fp16_one_w0_launch(stream, B, C, H, state, r, w, w0, k, v, a, b, y, elapsed_t);
+    return;
+  }
+  if (use_v2_seq(B, T)) {
+    wkv_fp16_seq_v2_kernel<<<dim3(B * H), dim3(N), 0, stream>>>(
+        T, C, H, state, r, w, w0, k, v, a, b, y, elapsed_t);
+  } else {
+    wkv_fp16_v1_exact_kernel<<<dim3(B * H), dim3(N), 0, stream>>>(
+        B, T, C, H, state, r, w, w0, k, v, a, b, y, elapsed_t);
+  }
+}
+
+void rwkv7_wkv_fp16_one_launch(
+    hipStream_t stream,
+    int B,
+    int C,
+    int H,
+    half* state,
+    const half* r,
+    const half* w,
+    const half* k,
+    const half* v,
+    const half* a,
+    const half* b,
+    half* y,
+    const int* elapsed_t) {
+  assert(C == H * N);
+  if (B <= 2) {
+    wkv_fp16_v1_clone_kernel<true><<<dim3(B * H), dim3(N), 0, stream>>>(
+        B,
+        1,
+        C,
+        H,
+        state, r, w, nullptr, k, v, a, b, y, elapsed_t);
+  } else if (B <= 64) {
+    wkv_fp16_one_cp_kernel<<<dim3(B * H), dim3(N), 0, stream>>>(
+        C,
+        H,
+        state, r, w, nullptr, k, v, a, b, y, elapsed_t);
+  } else if (B <= 128) {
+    wkv_fp16_one_direct_kernel<<<dim3(B * H), dim3(N), 0, stream>>>(
+        C,
+        H,
+        state, r, w, nullptr, k, v, a, b, y, elapsed_t);
+  } else {
+    wkv_fp16_v1_clone_kernel<true><<<dim3(B * H), dim3(N), 0, stream>>>(
+        B,
+        1,
+        C,
+        H,
+        state, r, w, nullptr, k, v, a, b, y, elapsed_t);
+  }
+}
+
+void rwkv7_wkv_fp16_one_w0_launch(
+    hipStream_t stream,
+    int B,
+    int C,
+    int H,
+    half* state,
+    const half* r,
+    const half* w,
+    const half* w0,
+    const half* k,
+    const half* v,
+    const half* a,
+    const half* b,
+    half* y,
+    const int* elapsed_t) {
+  assert(C == H * N);
+  if (B <= 2) {
+    wkv_fp16_v1_clone_kernel<true><<<dim3(B * H), dim3(N), 0, stream>>>(
+        B, 1, C, H, state, r, w, w0, k, v, a, b, y, elapsed_t);
+  } else if (B <= 64) {
+    wkv_fp16_one_cp_kernel<<<dim3(B * H), dim3(N), 0, stream>>>(
+        C, H, state, r, w, w0, k, v, a, b, y, elapsed_t);
+  } else if (B <= 128) {
+    wkv_fp16_one_direct_kernel<<<dim3(B * H), dim3(N), 0, stream>>>(
+        C, H, state, r, w, w0, k, v, a, b, y, elapsed_t);
+  } else {
+    wkv_fp16_v1_clone_kernel<true><<<dim3(B * H), dim3(N), 0, stream>>>(
+        B, 1, C, H, state, r, w, w0, k, v, a, b, y, elapsed_t);
+  }
+}

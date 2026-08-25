@@ -4,7 +4,7 @@
 #include <random>
 #include <stdexcept>
 
-#include <cuda_runtime.h>
+#include "rwkv_gpu_runtime.hpp"
 
 #include "utils/sampling.h"
 

@@ -4,10 +4,13 @@
 #include <iostream>
 #include <vector>
 
-#include <cuda_fp16.h>
-#include <cuda_runtime.h>
+#include "rwkv_gpu_runtime.hpp"
 
+#ifdef RWKV_USE_HIP
+#include "rwkv7_fast_v4_kernels.hip.hpp"
+#else
 #include "rwkv7_fast_v4_kernels.cuh"
+#endif
 #include "test_common.hpp"
 
 namespace {

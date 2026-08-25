@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-#include <cuda_fp16.h>
+#include "rwkv_gpu_runtime.hpp"
 
 #include "rwkv7_fast_v4_common.hpp"
 

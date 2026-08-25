@@ -1,7 +1,21 @@
 cmake_minimum_required(VERSION 3.24)
-project(rwkv7_fast_v4 LANGUAGES CXX CUDA)
 
-find_package(CUDAToolkit REQUIRED)
+set(RWKV_GPU_BACKEND "CUDA" CACHE STRING "GPU backend (CUDA or HIP)")
+set_property(CACHE RWKV_GPU_BACKEND PROPERTY STRINGS CUDA HIP)
+string(TOUPPER "${RWKV_GPU_BACKEND}" RWKV_GPU_BACKEND)
+if(RWKV_GPU_BACKEND STREQUAL "HIP")
+  project(rwkv7_fast_v4 LANGUAGES CXX HIP)
+  find_package(hip REQUIRED CONFIG)
+  find_package(hipblas REQUIRED CONFIG)
+  find_package(hipblaslt REQUIRED CONFIG)
+  find_package(hiprand REQUIRED CONFIG)
+elseif(RWKV_GPU_BACKEND STREQUAL "CUDA")
+  project(rwkv7_fast_v4 LANGUAGES CXX CUDA)
+  find_package(CUDAToolkit REQUIRED)
+else()
+  message(FATAL_ERROR "RWKV_GPU_BACKEND must be CUDA or HIP")
+endif()
+
 find_package(SQLite3 REQUIRED)
 find_package(Drogon CONFIG QUIET)
 if(NOT Drogon_FOUND)
@@ -84,12 +98,16 @@ endfunction()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CUDA_STANDARD 17)
-set(CMAKE_CUDA_STANDARD_REQUIRED ON)
-set(CMAKE_CUDA_RUNTIME_LIBRARY Shared)
+if(RWKV_GPU_BACKEND STREQUAL "HIP")
+  set(CMAKE_HIP_STANDARD 17)
+  set(CMAKE_HIP_STANDARD_REQUIRED ON)
+else()
+  set(CMAKE_CUDA_STANDARD 17)
+  set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+  set(CMAKE_CUDA_RUNTIME_LIBRARY Shared)
+endif()
 
-set(RWKV7_FAST_SERVER_CORE_SOURCES
-  src/rwkv7_fast_v4.cu
+set(RWKV7_FAST_HOST_SOURCES
   src/pth_archive.cpp
   src/pth_tensor.cpp
   src/rwkv_tokenizer.cpp
@@ -98,21 +116,42 @@ set(RWKV7_FAST_SERVER_CORE_SOURCES
   src/rwkv_inference_engine.cpp
   src/rwkv_prefill_admission.cpp
   src/rwkv_state_cache.cpp
-  src/utils/sampling.cu
-  cuda/rwkv7_v3a_ops.cu
-  cuda/rwkv7_fast_ops_fp16.cu
-  cuda/rwkv7_wkv_fp16_v2.cu
-  cuda/rwkv7_wkv_fp32_v2.cu
 )
+if(RWKV_GPU_BACKEND STREQUAL "HIP")
+  set(RWKV7_FAST_GPU_SOURCES
+    hip/rwkv7_fast_v4.hip
+    hip/sampling.hip
+    hip/rwkv7_v3a_ops.hip
+    hip/rwkv7_fast_ops_fp16.hip
+    hip/rwkv7_wkv_fp16_v2.hip
+    hip/rwkv7_wkv_fp32_v2.hip
+  )
+else()
+  set(RWKV7_FAST_GPU_SOURCES
+    src/rwkv7_fast_v4.cu
+    src/utils/sampling.cu
+    cuda/rwkv7_v3a_ops.cu
+    cuda/rwkv7_fast_ops_fp16.cu
+    cuda/rwkv7_wkv_fp16_v2.cu
+    cuda/rwkv7_wkv_fp32_v2.cu
+  )
+endif()
 
 add_library(rwkv7_fast_backend_core STATIC
-  ${RWKV7_FAST_SERVER_CORE_SOURCES}
+  ${RWKV7_FAST_HOST_SOURCES}
+  ${RWKV7_FAST_GPU_SOURCES}
 )
 
-target_include_directories(rwkv7_fast_backend_core PUBLIC cuda include src)
+if(RWKV_GPU_BACKEND STREQUAL "HIP")
+  target_include_directories(rwkv7_fast_backend_core PUBLIC hip include src src/utils)
+  target_compile_definitions(rwkv7_fast_backend_core PUBLIC RWKV_USE_HIP)
+  target_link_libraries(rwkv7_fast_backend_core PUBLIC hip::host roc::hipblas roc::hipblaslt hip::hiprand ${RWKV_SQLITE_TARGET})
+else()
+  target_include_directories(rwkv7_fast_backend_core PUBLIC cuda include src)
+  target_link_libraries(rwkv7_fast_backend_core PUBLIC CUDA::cublas CUDA::cublasLt ${RWKV_SQLITE_TARGET})
+  set_property(TARGET rwkv7_fast_backend_core PROPERTY CUDA_RUNTIME_LIBRARY Shared)
+endif()
 target_compile_definitions(rwkv7_fast_backend_core PRIVATE _IO_FP16_ RWKV_SAMPLING_NO_TORCH)
-target_link_libraries(rwkv7_fast_backend_core PUBLIC CUDA::cublas CUDA::cublasLt ${RWKV_SQLITE_TARGET})
-set_property(TARGET rwkv7_fast_backend_core PROPERTY CUDA_RUNTIME_LIBRARY Shared)
 
 if(RWKV7_FAST_BUILD_TESTS)
   enable_testing()
@@ -141,6 +180,7 @@ endif()
 
 target_compile_options(rwkv7_fast_backend_core PRIVATE
   $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<NOT:$<CONFIG:Debug>>>:-O3 --use_fast_math --extra-device-vectorization --ptxas-options=-O3>
+  $<$<AND:$<COMPILE_LANGUAGE:HIP>,$<NOT:$<CONFIG:Debug>>>:-O3>
 )
 
 if(Drogon_FOUND)
@@ -150,7 +190,11 @@ if(Drogon_FOUND)
     src/rwkv_model_router.cpp
   )
   target_link_libraries(rwkv_lighting_cuda PRIVATE rwkv7_fast_backend_core Drogon::Drogon)
-  target_include_directories(rwkv_lighting_cuda PRIVATE cuda include src)
+  if(RWKV_GPU_BACKEND STREQUAL "HIP")
+    target_include_directories(rwkv_lighting_cuda PRIVATE hip include src)
+  else()
+    target_include_directories(rwkv_lighting_cuda PRIVATE cuda include src)
+  endif()
   if(MSVC)
     target_compile_definitions(rwkv_lighting_cuda PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
     target_compile_options(rwkv_lighting_cuda PRIVATE /O2 /utf-8 /EHsc)
