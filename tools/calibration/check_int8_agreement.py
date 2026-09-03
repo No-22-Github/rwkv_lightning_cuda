@@ -19,8 +19,9 @@ def request(url, prompt):
     body = json.dumps({
         "model": "calibration",
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0,
+        "temperature": 0.001,
         "top_k": 1,
+        "top_p": 1,
         "max_tokens": 64,
         "stream": False,
     }).encode()

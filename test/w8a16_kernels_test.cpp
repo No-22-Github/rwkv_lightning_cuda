@@ -255,6 +255,50 @@ void check_packed_mma_simple() {
   std::cerr << "\n";
 }
 
+void check_packed_mma_bn128() {
+  constexpr int M = 64;
+  constexpr int N = 128;
+  constexpr int K = 4096;
+  std::mt19937 rng(9917);
+  std::uniform_int_distribution<int> q_dist(-127, 127);
+  std::uniform_real_distribution<float> x_dist(-1.0f, 1.0f);
+  std::vector<std::int8_t> source(static_cast<std::size_t>(N) * K);
+  std::vector<std::uint16_t> x_bits(static_cast<std::size_t>(M) * K);
+  std::vector<std::uint16_t> scales(N);
+  for (std::int8_t& value : source) value = static_cast<std::int8_t>(q_dist(rng));
+  for (std::uint16_t& value : x_bits) value = to_half_bits(x_dist(rng));
+  for (int n = 0; n < N; ++n) scales[n] = to_half_bits(0.0025f + 0.0003f * (n % 13));
+  DeviceBuffer<std::int8_t> dsrc;
+  DeviceBuffer<std::int8_t> dpacked;
+  DeviceBuffer<std::uint16_t> dx;
+  DeviceBuffer<std::uint16_t> ds;
+  DeviceBuffer<std::uint16_t> dy;
+  rwkv_test::copy_host_to_device(source, dsrc, "alloc bn128 source", "copy bn128 source");
+  dpacked.resize(source.size(), "alloc bn128 packed");
+  rwkv7_v4_i8_pack_launch(nullptr, dsrc.p, dpacked.p, N, K);
+  rwkv_test::copy_host_to_device(x_bits, dx, "alloc bn128 x", "copy bn128 x");
+  rwkv_test::copy_host_to_device(scales, ds, "alloc bn128 scales", "copy bn128 scales");
+  dy.resize(static_cast<std::size_t>(M) * N, "alloc bn128 y");
+  rwkv7_w8a16_linear_launch(nullptr, M, K, N, reinterpret_cast<const half*>(dx.p), dpacked.p,
+                            reinterpret_cast<const half*>(ds.p), W8BLayout::PackedNK,
+                            reinterpret_cast<half*>(dy.p));
+  rwkv_test::require_cuda(cudaGetLastError(), "launch bn128 packed");
+  rwkv_test::require_cuda(cudaDeviceSynchronize(), "sync bn128 packed");
+  const auto actual = rwkv_test::copy_device_buffer(dy, "copy bn128 y");
+  for (int m = 0; m < M; ++m) {
+    for (int n = 0; n < N; ++n) {
+      float expected = 0.0f;
+      for (int k = 0; k < K; ++k) {
+        expected += __half2float(*reinterpret_cast<const half*>(&x_bits[static_cast<std::size_t>(m) * K + k])) *
+                    static_cast<float>(source[static_cast<std::size_t>(n) * K + k]);
+      }
+      expected *= from_half_bits(scales[n]);
+      TEST_NEAR(from_half_bits(actual[static_cast<std::size_t>(m) * N + n]), expected,
+                2.0e-2f * std::max(1.0f, std::fabs(expected)) + 1.0e-3f);
+    }
+  }
+}
+
 void debug_ldmatrix() {
   constexpr int M = 16;
   constexpr int N = 128;
@@ -444,6 +488,7 @@ int main() {
   try {
     check_i8_pack();
     check_packed_mma();
+    check_packed_mma_bn128();
     for (int M : {1, 2, 4, 8, 12, 16, 32, 64, 100, 128}) {
       check_linear(M, 4096, 4096, W8BLayout::NK);
       if (M == 1 || M == 8 || M >= 9) {

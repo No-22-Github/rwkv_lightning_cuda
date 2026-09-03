@@ -331,6 +331,7 @@ struct CudaWeights {
   std::vector<std::uint16_t> cpu_emb_ln0_f16;
   CmixStatsBuffers cmix_stats;
   int cmix_sparse_max_rows = kDefaultQuantizedCmixSparseMaxRows;
+  std::vector<int> cmix_sparse_max_rows_by_layer;
 
   const GpuTensor* optional(const std::string& key) const {
     auto it = tensors.find(key);
@@ -1377,8 +1378,20 @@ struct W8A16TuneCacheData {
   std::string model_name;
   ModelDims dims;
   int sparse_max_rows = 0;
+  std::vector<int> sparse_max_rows_by_layer;
   std::vector<W8A16TuneRecord> records;
 };
+
+std::vector<int> measured_cmix_sparse_rows_by_layer(const ModelDims& dims) {
+  std::vector<int> rows(static_cast<std::size_t>(dims.layers), kDefaultQuantizedCmixSparseMaxRows);
+  if (dims.layers == 32 && dims.channels == 4096 && dims.ffn == 16384) {
+    static constexpr int measured[] = {
+        64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 32, 16,
+        16, 16, 16, 16, 16, 16, 16, 32, 16, 64, 64, 64, 64, 32, 32, 16};
+    rows.assign(std::begin(measured), std::end(measured));
+  }
+  return rows;
+}
 
 W8BLayout w8a16_layout(const GpuTensor* tensor) {
   return tensor->i8_packed ? W8BLayout::PackedNK
@@ -1470,6 +1483,15 @@ bool load_w8a16_tune_cache(
           cache->dims.head_size >> cache->dims.vocab >> cache->dims.ffn;
     } else if (key == "sparse_max_rows") {
       input >> cache->sparse_max_rows;
+    } else if (key == "sparse_layer_rows") {
+      int layer = -1;
+      int rows = -1;
+      input >> layer >> rows;
+      if (layer < 0 || layer >= dims.layers || rows < 0 || rows > 64) return false;
+      if (cache->sparse_max_rows_by_layer.empty()) {
+        cache->sparse_max_rows_by_layer.assign(static_cast<std::size_t>(dims.layers), -1);
+      }
+      cache->sparse_max_rows_by_layer[static_cast<std::size_t>(layer)] = rows;
     } else if (key == "split") {
       int layout = 0;
       W8A16TuneRecord record;
@@ -1485,6 +1507,12 @@ bool load_w8a16_tune_cache(
   if (tune_version != kTuneVersion || cache->gpu_name != gpu_name || cache->model_name != model_name ||
       !same_model_dims(cache->dims, dims) || cache->sparse_max_rows < 0 ||
       cache->sparse_max_rows > 64) return false;
+  if (!cache->sparse_max_rows_by_layer.empty()) {
+    if (cache->sparse_max_rows_by_layer.size() != static_cast<std::size_t>(dims.layers)) return false;
+    for (int rows : cache->sparse_max_rows_by_layer) {
+      if (rows < 0 || rows > 64) return false;
+    }
+  }
   for (const auto& shape : shapes) {
     for (int m : {8, 16, 32, 64, 128}) {
       bool found = false;
@@ -1517,6 +1545,9 @@ void save_w8a16_tune_cache(const std::filesystem::path& path, const W8A16TuneCac
          << cache.dims.heads << ' ' << cache.dims.head_size << ' '
          << cache.dims.vocab << ' ' << cache.dims.ffn << "\n"
          << "sparse_max_rows " << cache.sparse_max_rows << "\n";
+  for (std::size_t layer = 0; layer < cache.sparse_max_rows_by_layer.size(); ++layer) {
+    output << "sparse_layer_rows " << layer << ' ' << cache.sparse_max_rows_by_layer[layer] << "\n";
+  }
   for (const auto& record : cache.records) {
     output << "split " << record.K << ' ' << record.N << ' '
            << static_cast<int>(record.layout) << ' ' << record.m_bucket << ' '
@@ -1774,6 +1805,9 @@ void configure_w8a16_tuning(
       rwkv7_w8a16_tuning_set(record.K, record.N, record.layout, record.m_bucket, record.split_k);
     }
     weights.cmix_sparse_max_rows = cache.sparse_max_rows;
+    weights.cmix_sparse_max_rows_by_layer = cache.sparse_max_rows_by_layer.empty()
+        ? measured_cmix_sparse_rows_by_layer(weights.dims)
+        : cache.sparse_max_rows_by_layer;
     std::cout << "w8a16_tune_cache hit path=" << cache_path
               << " gpu=\"" << gpu_name << "\" sparse_max_rows="
               << weights.cmix_sparse_max_rows << "\n";
@@ -1787,7 +1821,9 @@ void configure_w8a16_tuning(
   cache.sparse_max_rows = value_it == shapes.end()
       ? kDefaultQuantizedCmixSparseMaxRows
       : tune_cmix_sparse_threshold(*value_it);
+  cache.sparse_max_rows_by_layer = measured_cmix_sparse_rows_by_layer(weights.dims);
   weights.cmix_sparse_max_rows = cache.sparse_max_rows;
+  weights.cmix_sparse_max_rows_by_layer = cache.sparse_max_rows_by_layer;
   save_w8a16_tune_cache(cache_path, cache);
   std::cout << "w8a16_tune complete path=" << cache_path
             << " sparse_max_rows=" << weights.cmix_sparse_max_rows << "\n";
@@ -2062,9 +2098,13 @@ void run_backend_forward(
           stream, rows, F, hid, weights.cmix_stats.nonzero.p + layer,
           weights.cmix_stats.total.p + layer, weights.cmix_stats.max_bits.p + layer);
     }
+    const int layer_sparse_max_rows =
+        layer < static_cast<int>(weights.cmix_sparse_max_rows_by_layer.size())
+            ? weights.cmix_sparse_max_rows_by_layer[static_cast<std::size_t>(layer)]
+            : weights.cmix_sparse_max_rows;
     const CmixMode cmix_mode =
         run.cmix_sparse != "off" && path.cmix == CmixMode::Dense && w.ffn_value_w->is_int8() && C >= 4096 &&
-                rows <= weights.cmix_sparse_max_rows
+                rows <= layer_sparse_max_rows
             ? CmixMode::NoFcRows2
             : path.cmix;
     const int profile_ffn_value = profiler.begin(stream, "ffn_value");

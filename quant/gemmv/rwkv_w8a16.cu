@@ -641,7 +641,7 @@ __global__ __launch_bounds__(256, 1) void w8a16_mma_kernel(
       const int chunk = index & 7;
       const int global_row = block_m + row;
       const int global_k = (local_k_begin + tile) * BK + chunk * 8;
-      w8_cp_async_16<BLOCK_M < 128>(
+      w8_cp_async_16<false>(
           w8_x_addr(x_stage, row, chunk),
           x + static_cast<std::int64_t>(global_row) * K + global_k,
           pred && global_row < M);
@@ -652,7 +652,7 @@ __global__ __launch_bounds__(256, 1) void w8a16_mma_kernel(
       const int kt16 = (local_k_begin + tile) * 4;
       const std::int64_t word_base =
           (static_cast<std::int64_t>(nt) * (K / 16) + kt16) * 8 * 32;
-      w8_cp_async_16<BLOCK_M < 128>(
+      w8_cp_async_16<true>(
           b_stage + tid * 16,
           weight + word_base * 4 + static_cast<std::int64_t>(tid) * 16,
           pred);
@@ -810,6 +810,184 @@ __global__ __launch_bounds__(256, 1) void w8a16_mma_kernel(
         }
       }
       __syncthreads();
+    }
+  }
+#else
+  (void)M; (void)K; (void)N; (void)x; (void)weight; (void)scales;
+  (void)k_begin; (void)k_end; (void)y; (void)scratch;
+#endif
+}
+
+template <bool Packed>
+__global__ __launch_bounds__(256, 2) void w8a16_mma_bm64_bn128_kernel(
+    int M,
+    int K,
+    int N,
+    const half* __restrict__ x,
+    const std::int8_t* __restrict__ weight,
+    const half* __restrict__ scales,
+    int k_begin,
+    int k_end,
+    half* __restrict__ y,
+    float* __restrict__ scratch) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+  constexpr int THREADS = 256;
+  constexpr int BLOCK_M = 64;
+  constexpr int BN = 128;
+  constexpr int BK = 64;
+  constexpr int STAGES = 3;
+  constexpr int N_GROUPS_PER_WARP = 4;
+  constexpr int WORDS_PER_64 = (BK / 16) * 8 * 32;
+  const int tid = threadIdx.x;
+  const int warp = tid >> 5;
+  const int lane = tid & 31;
+  const int warp_m = warp >> 2;
+  const int warp_n = warp & 3;
+  const int block_m = static_cast<int>(blockIdx.x) * BLOCK_M;
+  const int block_n = static_cast<int>(blockIdx.y) * BN;
+  const int total_k_tiles = k_end - k_begin;
+  const int tiles_per_split = (total_k_tiles + static_cast<int>(gridDim.z) - 1) /
+                              static_cast<int>(gridDim.z);
+  const int local_k_begin = k_begin + static_cast<int>(blockIdx.z) * tiles_per_split;
+  const int local_k_end = min(k_end, local_k_begin + tiles_per_split);
+
+  const std::size_t x_stage_bytes = static_cast<std::size_t>(BLOCK_M) * BK * sizeof(half);
+  extern __shared__ unsigned char shared[];
+  half* x_shared = reinterpret_cast<half*>(shared);
+  std::uint8_t* b_shared = shared + STAGES * x_stage_bytes;
+
+  W8FragC acc[2][N_GROUPS_PER_WARP];
+#pragma unroll
+  for (int m = 0; m < 2; ++m) {
+#pragma unroll
+    for (int n = 0; n < N_GROUPS_PER_WARP; ++n) {
+#pragma unroll
+      for (int i = 0; i < 4; ++i) acc[m][n].value[i] = 0.0f;
+    }
+  }
+
+  const int k_tiles = max(0, local_k_end - local_k_begin);
+  auto fetch_stage = [&](int stage, int tile, bool pred) {
+    half* x_stage = x_shared + static_cast<std::size_t>(stage) * BLOCK_M * BK;
+    const int x_segments = BLOCK_M * 8;
+    for (int index = tid; index < x_segments; index += THREADS) {
+      const int row = index / 8;
+      const int chunk = index & 7;
+      const int global_row = block_m + row;
+      const int global_k = (local_k_begin + tile) * BK + chunk * 8;
+      const bool valid = pred && global_row < M;
+      if (valid) {
+        w8_cp_async_16<false>(
+            w8_x_addr(x_stage, row, chunk),
+            x + static_cast<std::int64_t>(global_row) * K + global_k,
+            true);
+      } else {
+        *reinterpret_cast<uint4*>(w8_x_addr(x_stage, row, chunk)) = make_uint4(0, 0, 0, 0);
+      }
+    }
+    std::uint8_t* b_stage = b_shared + static_cast<std::size_t>(stage) * BK * BN;
+    const int b_segments = (BK * BN) / 16;
+    for (int vector = tid; vector < b_segments; vector += THREADS) {
+      if constexpr (Packed) {
+        const int group = vector / 256;
+        const int local = vector & 255;
+        const int nt = block_n / 64 + group;
+        const int kt16 = (local_k_begin + tile) * 4;
+        const std::int64_t word_base =
+            (static_cast<std::int64_t>(nt) * (K / 16) + kt16) * 8 * 32;
+        w8_cp_async_16<true>(
+            b_stage + static_cast<std::size_t>(group) * BK * 64 + local * 16,
+            weight + word_base * 4 + static_cast<std::int64_t>(local) * 16,
+            pred);
+      } else {
+        const int chunks_per_row = BN / 16;
+        const int row = vector / chunks_per_row;
+        const int chunk = vector & (chunks_per_row - 1);
+        const int global_k = (local_k_begin + tile) * BK + row;
+        w8_cp_async_16<false>(
+            b_stage + row * BN + w8_raw_physical_col(row, chunk * 16),
+            weight + static_cast<std::int64_t>(global_k) * N + block_n + chunk * 16,
+            pred);
+      }
+    }
+    w8_cp_async_commit();
+  };
+
+  for (int stage = 0; stage < STAGES - 1; ++stage) {
+    fetch_stage(stage, stage, stage < k_tiles);
+  }
+  for (int tile = 0; tile < k_tiles; ++tile) {
+    w8_cp_async_wait<STAGES - 2>();
+    __syncthreads();
+    const int next = tile + STAGES - 1;
+    fetch_stage((tile + STAGES - 1) % STAGES, next, next < k_tiles);
+    const int stage = tile % STAGES;
+    half* x_stage = x_shared + static_cast<std::size_t>(stage) * BLOCK_M * BK;
+    const std::uint8_t* b_stage = b_shared + static_cast<std::size_t>(stage) * BK * BN;
+    for (int k_part = 0; k_part < 4; ++k_part) {
+      W8FragA a[2];
+#pragma unroll
+      for (int m = 0; m < 2; ++m) {
+        const int row = (warp_m * 2 + m) * 16 + (lane & 15);
+        const int chunk = k_part * 2 + (lane >> 4);
+        w8_ldmatrix(a[m], w8_x_addr(x_stage, row, chunk));
+      }
+      W8FragB b[N_GROUPS_PER_WARP];
+#pragma unroll
+      for (int n = 0; n < N_GROUPS_PER_WARP; ++n) {
+        const int n_group = warp_n * N_GROUPS_PER_WARP + n;
+        if constexpr (Packed) {
+          const int word_offset = (n_group / 8) * WORDS_PER_64 +
+                                  (k_part * 8 + (n_group & 7)) * 32 + lane;
+          const uint32_t word = *reinterpret_cast<const uint32_t*>(b_stage + word_offset * 4);
+          b[n] = w8_dequant_packed(word);
+        } else {
+          const int n0 = n_group * 8 + (lane >> 2);
+          b[n] = w8_dequant_raw(b_stage, BN, k_part * 16 + ((lane & 3) * 2), n0);
+        }
+      }
+#pragma unroll
+      for (int m = 0; m < 2; ++m) {
+#pragma unroll
+        for (int n = 0; n < N_GROUPS_PER_WARP; ++n) w8_mma(a[m], b[n], acc[m][n]);
+      }
+    }
+    __syncthreads();
+  }
+  w8_cp_async_wait<0>();
+  __syncthreads();
+
+  const int g = lane >> 2;
+  const int r = lane & 3;
+#pragma unroll
+  for (int m = 0; m < 2; ++m) {
+#pragma unroll
+    for (int n = 0; n < N_GROUPS_PER_WARP; ++n) {
+      const int col = block_n + (warp_n * N_GROUPS_PER_WARP + n) * 8 + 2 * r;
+      const int row0 = block_m + (warp_m * 2 + m) * 16 + g;
+      const int row1 = row0 + 8;
+      const W8FragC& total = acc[m][n];
+      const bool split = scratch != nullptr;
+      if (row0 < M) {
+        if (split) {
+          atomicAdd(scratch + static_cast<std::int64_t>(row0) * N + col, total.value[0]);
+          atomicAdd(scratch + static_cast<std::int64_t>(row0) * N + col + 1, total.value[1]);
+        } else {
+          const float2 s = __half22float2(*reinterpret_cast<const half2*>(scales + col));
+          *reinterpret_cast<half2*>(y + static_cast<std::int64_t>(row0) * N + col) =
+              __floats2half2_rn(total.value[0] * s.x, total.value[1] * s.y);
+        }
+      }
+      if (row1 < M) {
+        if (split) {
+          atomicAdd(scratch + static_cast<std::int64_t>(row1) * N + col, total.value[2]);
+          atomicAdd(scratch + static_cast<std::int64_t>(row1) * N + col + 1, total.value[3]);
+        } else {
+          const float2 s = __half22float2(*reinterpret_cast<const half2*>(scales + col));
+          *reinterpret_cast<half2*>(y + static_cast<std::int64_t>(row1) * N + col) =
+              __floats2half2_rn(total.value[2] * s.x, total.value[3] * s.y);
+        }
+      }
     }
   }
 #else
@@ -1006,6 +1184,77 @@ __global__ void w8a16_scale_epilogue_kernel(
   y[index] = __float2half_rn(scratch[index] * __half2float(scales[n]));
 }
 
+template <bool Packed>
+void launch_mma_bm64_bn128(
+    cudaStream_t stream,
+    int M,
+    int K,
+    int N,
+    const half* x,
+    const std::int8_t* weight,
+    const half* scales,
+    half* y,
+    void* workspace,
+    std::size_t workspace_bytes,
+    int force_split_k) {
+  constexpr int BK = 64;
+  constexpr int BN = 128;
+  constexpr int STAGES = 3;
+  const int k_tiles_total = K / BK;
+  const int m_tiles = (M + 63) / 64;
+  const int n_tiles = N / BN;
+  int split_k = 1;
+  if (force_split_k > 0) {
+    split_k = force_split_k;
+  } else if (const int tuned = lookup_tuned_split(K, N, Packed ? W8BLayout::PackedNK : W8BLayout::KN, M); tuned > 0) {
+    split_k = tuned;
+  } else if (workspace == nullptr || workspace_bytes < static_cast<std::size_t>(M) * N * sizeof(float)) {
+    split_k = 1;
+  } else {
+    while (n_tiles * m_tiles * split_k < 2 * std::max(1, cached_device_info().sm_count) &&
+           split_k * 2 <= k_tiles_total / 4) split_k *= 2;
+  }
+  if (split_k < 1) split_k = 1;
+  if (split_k > k_tiles_total) split_k = k_tiles_total;
+  float* scratch = nullptr;
+  if (split_k > 1) {
+    const std::size_t count = static_cast<std::size_t>(M) * N;
+    const std::size_t required = count * sizeof(float);
+    if (workspace == nullptr || workspace_bytes < required) {
+      std::fprintf(stderr, "W8A16 split-K workspace too small: need %zu bytes, have %zu\n",
+                   required, workspace_bytes);
+      std::exit(1);
+    }
+    scratch = reinterpret_cast<float*>(workspace);
+    constexpr int threads = 256;
+    w8a16_zero_f32_kernel<<<static_cast<int>((count + threads - 1) / threads), threads, 0, stream>>>(
+        scratch, count);
+  }
+  const std::size_t x_stage_bytes = static_cast<std::size_t>(64) * BK * sizeof(half);
+  const std::size_t b_stage_bytes = static_cast<std::size_t>(BK) * BN;
+  const std::size_t shared_bytes = STAGES * (x_stage_bytes + b_stage_bytes);
+  static bool shared_limit_set = false;
+  if (!shared_limit_set) {
+    const cudaError_t status = cudaFuncSetAttribute(
+        w8a16_mma_bm64_bn128_kernel<Packed>, cudaFuncAttributeMaxDynamicSharedMemorySize,
+        static_cast<int>(shared_bytes));
+    if (status != cudaSuccess) {
+      std::fprintf(stderr, "set W8A16 BM64 BN128 shared memory failed: %s\n", cudaGetErrorString(status));
+      std::exit(1);
+    }
+    shared_limit_set = true;
+  }
+  const dim3 grid(static_cast<unsigned>(m_tiles), static_cast<unsigned>(n_tiles), static_cast<unsigned>(split_k));
+  w8a16_mma_bm64_bn128_kernel<Packed><<<grid, 256, shared_bytes, stream>>>(
+      M, K, N, x, weight, scales, 0, k_tiles_total, y, scratch);
+  if (scratch != nullptr) {
+    constexpr int threads = 256;
+    const std::size_t count = static_cast<std::size_t>(M) * N;
+    w8a16_scale_epilogue_kernel<<<static_cast<int>((count + threads - 1) / threads), threads, 0, stream>>>(
+        scratch, scales, y, M, N);
+  }
+}
+
 template <bool Packed, int BN>
 void launch_mma_bm128(
     cudaStream_t stream,
@@ -1180,6 +1429,16 @@ void rwkv7_w8a16_linear_launch(
   assert(K % 64 == 0);
   const int major = cached_device_info().compute_major;
   if (major >= 8 && (layout == W8BLayout::PackedNK || layout == W8BLayout::KN)) {
+    if (M == 32 && N % 128 == 0) {
+      if (layout == W8BLayout::PackedNK) {
+        launch_mma_bm64_bn128<true>(stream, M, K, N, x, qweight, scale, y,
+                                    workspace, workspace_bytes, force_split_k);
+      } else {
+        launch_mma_bm64_bn128<false>(stream, M, K, N, x, qweight, scale, y,
+                                     workspace, workspace_bytes, force_split_k);
+      }
+      return;
+    }
     if (M <= 16) {
       if (layout == W8BLayout::PackedNK) {
         launch_mma_gemm<16, true>(stream, M, K, N, x, qweight, scale, y,
@@ -1198,11 +1457,21 @@ void rwkv7_w8a16_linear_launch(
       }
     } else if (M <= 64) {
       if (layout == W8BLayout::PackedNK) {
-        launch_mma_gemm<64, true>(stream, M, K, N, x, qweight, scale, y,
-                                  workspace, workspace_bytes, force_split_k);
+        if (N % 128 == 0) {
+          launch_mma_bm64_bn128<true>(stream, M, K, N, x, qweight, scale, y,
+                                      workspace, workspace_bytes, force_split_k);
+        } else {
+          launch_mma_gemm<64, true>(stream, M, K, N, x, qweight, scale, y,
+                                    workspace, workspace_bytes, force_split_k);
+        }
       } else {
-        launch_mma_gemm<64, false>(stream, M, K, N, x, qweight, scale, y,
-                                   workspace, workspace_bytes, force_split_k);
+        if (N % 128 == 0) {
+          launch_mma_bm64_bn128<false>(stream, M, K, N, x, qweight, scale, y,
+                                       workspace, workspace_bytes, force_split_k);
+        } else {
+          launch_mma_gemm<64, false>(stream, M, K, N, x, qweight, scale, y,
+                                     workspace, workspace_bytes, force_split_k);
+        }
       }
     } else if (M <= 128) {
       if (N % 128 == 0) {
@@ -1224,11 +1493,21 @@ void rwkv7_w8a16_linear_launch(
       }
     } else {
       if (layout == W8BLayout::PackedNK) {
-        launch_mma_gemm<64, true>(stream, M, K, N, x, qweight, scale, y,
-                                  workspace, workspace_bytes, force_split_k);
+        if (N % 128 == 0) {
+          launch_mma_bm128<true, 128>(stream, M, K, N, x, qweight, scale, y,
+                                      workspace, workspace_bytes, force_split_k);
+        } else {
+          launch_mma_gemm<64, true>(stream, M, K, N, x, qweight, scale, y,
+                                    workspace, workspace_bytes, force_split_k);
+        }
       } else {
-        launch_mma_gemm<64, false>(stream, M, K, N, x, qweight, scale, y,
-                                   workspace, workspace_bytes, force_split_k);
+        if (N % 128 == 0) {
+          launch_mma_bm128<false, 128>(stream, M, K, N, x, qweight, scale, y,
+                                       workspace, workspace_bytes, force_split_k);
+        } else {
+          launch_mma_gemm<64, false>(stream, M, K, N, x, qweight, scale, y,
+                                     workspace, workspace_bytes, force_split_k);
+        }
       }
     }
     return;

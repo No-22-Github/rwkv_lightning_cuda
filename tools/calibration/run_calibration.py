@@ -36,8 +36,9 @@ def main():
     lines.extend([
         "## HTTP agreement",
         "",
-        "Run `python3 tools/calibration/check_int8_agreement.py` with FP16 and INT8 servers.",
-        "The current build omits the HTTP server when Drogon is unavailable.",
+        "Run `python3 tools/calibration/check_int8_agreement.py` with FP16 and INT8 servers",
+        "after starting the rebuilt Drogon-backed HTTP target. The target is omitted only",
+        "when Drogon is unavailable at configure time.",
     ])
     pathlib.Path(args.report).write_text("\n".join(lines) + "\n", encoding="utf-8")
 

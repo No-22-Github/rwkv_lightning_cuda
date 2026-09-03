@@ -20,18 +20,19 @@ metric: `(FP16 ms - W8A16 ms) / FP16 ms * 100`.
 
 | Batch | FP16 ms | W8A16 ms | W8A16 wins ms | FP16 TPS | W8A16 TPS | TPS gain | Time reduction |
 |---:|---:|---:|---:|---:|---:|---:|---:|
-| 1 | 38.0710 | 20.6011 | 17.4699 | 26.2667 | 48.5411 | 84.8008% | 45.8877% |
-| 2 | 39.9043 | 21.8003 | 18.1040 | 50.1199 | 91.7419 | 83.0447% | 45.3685% |
-| 4 | 43.6736 | 24.2221 | 19.4515 | 91.5885 | 165.1384 | 80.3048% | 44.5383% |
-| 8 | 46.2152 | 24.7850 | 21.4302 | 173.1032 | 322.7759 | 86.4644% | 46.3705% |
-| 16 | 56.1050 | 28.3108 | 27.7942 | 285.1796 | 565.1553 | 98.1753% | 49.5396% |
-| 32 | 58.8777 | 36.3014 | 22.5763 | 543.4995 | 881.5087 | 62.1913% | 38.3444% |
-| 64 | 65.8315 | 48.8688 | 16.9627 | 972.1790 | 1309.6290 | 34.7107% | 25.7668% |
+| 1 | 38.0691 | 20.6220 | 17.4471 | 26.2680 | 48.4919 | 84.6043% | 45.8301% |
+| 2 | 39.9039 | 21.8185 | 18.0854 | 50.1204 | 91.6653 | 82.8902% | 45.3224% |
+| 4 | 43.6685 | 24.2293 | 19.4392 | 91.5992 | 165.0894 | 80.2301% | 44.5154% |
+| 8 | 46.1859 | 24.8054 | 21.3805 | 173.2130 | 322.5104 | 86.1929% | 46.2923% |
+| 16 | 56.0823 | 28.6889 | 27.3934 | 285.2950 | 557.7070 | 95.4843% | 48.8450% |
+| 32 | 58.8945 | 33.8133 | 25.0812 | 543.3445 | 946.3732 | 74.1755% | 42.5867% |
+| 64 | 65.8202 | 40.7663 | 25.0539 | 972.3459 | 1569.9242 | 61.4574% | 38.0642% |
 
 The corrected random benchmark removes the old identical-state/L2-reuse artifact.
-The W8A16 sweep is a cache-hit run after startup tuning completed.
-INT8 wins every measured batch, with 25.7--49.5% lower decode time and 34.6--98.2%
-higher actual throughput than FP16.
+The W8A16 sweep is a cache-hit run after startup tuning completed, including the
+BM64xBN128 and per-layer cmix changes described in Section 9. INT8 wins every measured
+batch, with 38.1--48.8% lower decode time and 61.5--95.5% higher actual throughput
+than FP16.
 
 ## 2. Cmix threshold and off switch
 
@@ -63,10 +64,10 @@ medians (ms) are:
 
 | Shape | K | N | Layout | M=8 S/ms | M=16 S/ms | M=32 S/ms | M=64 S/ms | M=128 S/ms |
 |---|---:|---:|---|---:|---:|---:|---:|---:|
-| att C×C | 4096 | 4096 | PackedNK | 1/0.082784 | 1/0.080000 | 1/0.089088 | 1/0.104448 | 1/0.131936 |
-| ffn.key | 4096 | 16384 | PackedNK | 1/0.249856 | 1/0.249856 | 1/0.258048 | 1/0.386112 | 1/0.514880 |
-| ffn.value | 16384 | 4096 | KN/RawKN | 1/0.253952 | 1/0.257920 | 4/0.281792 | 1/0.393216 | 1/0.528544 |
-| head | 4096 | 65536 | PackedNK | 1/0.982176 | 1/0.985856 | 1/0.993280 | 1/1.349340 | 1/1.865730 |
+| att C×C | 4096 | 4096 | PackedNK | 1/0.081920 | 4/0.073728 | 1/0.087424 | 1/0.083968 | 1/0.131072 |
+| ffn.key | 4096 | 16384 | PackedNK | 1/0.249568 | 1/0.249792 | 1/0.256000 | 1/0.263168 | 1/0.514976 |
+| ffn.value | 16384 | 4096 | KN/RawKN | 1/0.252832 | 1/0.253952 | 4/0.271360 | 2/0.278144 | 1/0.528384 |
+| head | 4096 | 65536 | PackedNK | 1/0.982976 | 1/0.983040 | 1/0.990208 | 1/1.030980 | 1/1.865980 |
 
 The default path is alongside the service state database,
 `<state-db-directory>/<model-stem>.<gpu-name>.w8a16.tune` (the current working
@@ -76,7 +77,7 @@ hit skips all tuning. With no cache entry, the automatic fallback
 uses the specification §2.7 target of at least `2 * SM` resident blocks, subject
 to each K split containing at least four BK tiles. The 4060 Ti device information
 (SM count and compute major) is queried once per process and reused by all launches.
-The cache stores `kTuneVersion`; a version mismatch invalidates the file and reruns
+The cache stores `kTuneVersion` (currently 4); a version mismatch invalidates the file and reruns
 tuning. Writes go to `<cache>.tmp` and are committed with a rename so readers never
 observe a partially written cache.
 
@@ -85,19 +86,22 @@ compares the sparse and dense paths at each requested row count:
 
 | Rows | Sparse ms | Dense ms |
 |---:|---:|---:|
-| 16 | 0.571392 | 0.266240 |
-| 32 | 1.138590 | 0.286720 |
-| 64 | 0.984800 | 0.376960 |
+| 16 | 0.571520 | 0.264192 |
+| 32 | 1.137660 | 0.282560 |
+| 64 | 0.976896 | 0.300032 |
 
 Sparse did not win any of these microbenchmarks, so the tuner keeps the proven
 runtime fallback of 32 rather than changing the full-model decode behavior based
 on a non-representative single-layer result. The value is runtime state, not a
 compile-time constant, and is persisted in the same cache file.
 
-The 4060 Ti cache selects the same split table as the prior hand-tuned settings
-(S=1 everywhere except ffn.value at M=32, S=4). The cache-hit decode sweep below
-therefore stays within the requested ±2% envelope for every batch; no batch
-regressed against the hand-tuned reference.
+The version-4 4060 Ti cache selects S=4 for attention C×C at M=16 and for ffn.value
+at M=32, S=2 for ffn.value at M=64, and S=1 for all other entries. Against a
+version-4 cache with the hand-tuned choices (S=1 except ffn.value M=32 S=4), the
+cache-hit decode table differed by -0.14%, -0.01%, -0.02%, -0.07%, +1.22%, -0.05%,
+and +0.23% for B1..B64 respectively; every batch is within the requested ±2%
+envelope. Split-K choices within this margin are treated as tuning noise, not as
+model-wide regressions.
 
 The current prefill path also uses a BM128 kernel with BN128 whenever `N` is a
 multiple of 128; other shapes retain BN64. RawKN shared-memory loads use the same
@@ -110,9 +114,9 @@ four-way column swizzle on write and read. The standalone B128 measurements are:
 | 16384 | 4096 | 0.550000 | 0.528576 | 0.961047x |
 | 4096 | 65536 | 1.87411 | 2.13238 | 1.13781x |
 
-For the 1024-token prefill workload, the BN64 control was 503.148 ms while the
-BN128 path measured 450.628 ms in the final cache-hit run; the control is included only as
-an A/B diagnostic, not as a gate result.
+For the 1024-token prefill workload, an earlier BN64/BN128 A/B was 503.148/450.628 ms.
+The post-review cache-hit gate rerun is reported in Section 6; the earlier control is
+included only as an A/B diagnostic.
 
 ## 3. Generation and logit consistency
 
@@ -220,58 +224,61 @@ wall-clock values in section 1 remain the authoritative benchmark numbers.
 
 | Precision/batch | Kernel sum (ms) | Instances |
 |---|---:|---:|
-| INT8 B4 | 23.675010 | 516 |
-| INT8 B8 | 23.734593 | 928 |
-| INT8 B64 | 49.210617 | 928 |
-| FP16 B4 | 42.628386 | 516 |
-| FP16 B8 | 43.492653 | 928 |
-| FP16 B64 | 65.200732 | 960 |
+| INT8 B4 | 23.677919 | 516 |
+| INT8 B8 | 23.738567 | 928 |
+| INT8 B64 | 39.206702 | 956 |
+| FP16 B4 | 42.344373 | 516 |
+| FP16 B8 | 43.365465 | 928 |
+| FP16 B64 | 65.202338 | 960 |
 
 The largest kernel-name aggregates are:
 
 | Precision/batch | Kernel name (demangled template shortened only for readability) | Instances | Total ms |
 |---|---|---:|---:|
-| INT8 B4 | `w8a16_mma_kernel<16,Packed>` | 161 | 17.241731 |
-| INT8 B4 | `cmix_sparse_spmv_relu_rows_i8_kernel` | 32 | 1.883485 |
-| INT8 B4 | `linear_wagv_rank_out_f16_kernel<128,4>` | 31 | 2.245488 |
-| INT8 B4 | `linear_wagv_rank_in_f16_kernel<256>` | 31 | 1.517418 |
-| INT8 B4 | `wkv_fp16_one_cp_kernel` | 32 | 0.340434 |
-| INT8 B8 | `w8a16_mma_kernel<16,Packed>` | 161 | 17.319306 |
-| INT8 B8 | `cmix_sparse_spmv_relu_rows_t1024_i8_kernel<1024,512>` | 32 | 2.817607 |
-| INT8 B8 | `cutlass wmma f16 16x16x16 nn` | 190 | 1.114839 |
-| INT8 B8 | `wkv_fp16_one_cp_kernel` | 32 | 0.654240 |
-| INT8 B8 | `cutlass wmma f16 32x32x16 nn` | 32 | 0.632991 |
-| INT8 B8 | `cutlass tensorop f16 64x64 nn` | 32 | 0.573373 |
-| INT8 B64 | `w8a16_mma_kernel<64,Packed>` | 161 | 25.099521 |
-| INT8 B64 | `w8a16_mma_kernel<64,RawKN>` | 32 | 12.601412 |
-| INT8 B64 | `wkv_fp16_one_cp_kernel` | 32 | 7.559697 |
-| INT8 B64 | `cutlass tensorop f16 128x64 nn` | 127 | 1.156665 |
-| INT8 B64 | `cutlass tensorop f16 64x64 nn` | 127 | 1.101881 |
-| FP16 B4 | `cutlass wmma f16 16x16x16 tn` | 33 | 18.171141 |
-| FP16 B4 | `cutlass wmma f16 32x32x16 tn` | 128 | 16.314540 |
-| FP16 B4 | `cmix_sparse_spmv_relu_rows_kernel` | 32 | 3.297764 |
-| FP16 B4 | `linear_wagv_rank_out_f16_kernel<128,4>` | 31 | 2.346163 |
-| FP16 B4 | `linear_wagv_rank_in_f16_kernel<256>` | 31 | 1.660146 |
-| FP16 B4 | `wkv_fp16_one_cp_kernel` | 32 | 0.325360 |
-| FP16 B8 | `cutlass wmma f16 16x16x16 tn` | 33 | 18.417205 |
-| FP16 B8 | `cutlass wmma f16 32x32x16 tn` | 128 | 16.492721 |
-| FP16 B8 | `cmix_sparse_spmv_relu_rows_t512_kernel` | 32 | 5.152257 |
-| FP16 B8 | `cutlass wmma f16 16x16x16 nn` | 190 | 1.053117 |
-| FP16 B8 | `wkv_fp16_one_cp_kernel` | 32 | 0.577786 |
-| FP16 B8 | `cutlass tensorop f16 64x64 nn` | 32 | 0.550618 |
-| FP16 B64 | `cutlass wmma f16 32x32x16 tn` | 128 | 19.087575 |
-| FP16 B64 | `ampere fp16 s1688gemm 256x64 tn` | 32 | 16.978982 |
-| FP16 B64 | `cutlass f16 relu 256x64 tn` | 32 | 16.383274 |
-| FP16 B64 | `wkv_fp16_one_cp_kernel` | 32 | 6.375614 |
+| INT8 B4 | `w8a16_mma_kernel<16,Packed>` | 161 | 17.241210 |
+| INT8 B4 | `linear_wagv_rank_out_f16_kernel<128,4>` | 31 | 2.246309 |
+| INT8 B4 | `cmix_sparse_spmv_relu_rows_i8_kernel` | 32 | 1.884214 |
+| INT8 B4 | `linear_wagv_rank_in_f16_kernel<256>` | 31 | 1.518248 |
+| INT8 B4 | `wkv_fp16_one_cp_kernel` | 32 | 0.340112 |
+| INT8 B8 | `w8a16_mma_kernel<16,Packed>` | 161 | 17.315647 |
+| INT8 B8 | `cmix_sparse_spmv_relu_rows_t1024_i8_kernel<1024,512>` | 32 | 2.823618 |
+| INT8 B8 | `cutlass wmma f16 16x16x16 nn` | 190 | 1.115415 |
+| INT8 B8 | `wkv_fp16_one_cp_kernel` | 32 | 0.654365 |
+| INT8 B8 | `cutlass wmma f16 32x32x16 nn` | 32 | 0.631998 |
+| INT8 B8 | `cutlass tensorop f16 64x64 nn` | 32 | 0.571383 |
+| INT8 B64 | `w8a16_mma_bm64_bn128_kernel<Packed>` | 161 | 18.885829 |
+| INT8 B64 | `wkv_fp16_one_cp_kernel` | 32 | 7.390786 |
+| INT8 B64 | `w8a16_mma_bm64_bn128_kernel<RawKN>` | 14 | 4.479509 |
+| INT8 B64 | `cmix_sparse_spmv_relu_rows_t1024_i8_kernel<1024,4096>` | 18 | 4.474198 |
+| INT8 B64 | `cutlass tensorop f16 128x64 nn` | 127 | 1.167380 |
+| INT8 B64 | `cutlass tensorop f16 64x64 nn` | 127 | 1.125461 |
+| FP16 B4 | `cutlass wmma f16 16x16x16 tn` | 33 | 18.156836 |
+| FP16 B4 | `cutlass wmma f16 32x32x16 tn` | 128 | 16.308843 |
+| FP16 B4 | `cmix_sparse_spmv_relu_rows_kernel` | 32 | 3.278038 |
+| FP16 B4 | `linear_wagv_rank_out_f16_kernel<128,4>` | 31 | 2.213892 |
+| FP16 B4 | `linear_wagv_rank_in_f16_kernel<256>` | 31 | 1.587083 |
+| FP16 B4 | `wkv_fp16_one_cp_kernel` | 32 | 0.317451 |
+| FP16 B8 | `cutlass wmma f16 16x16x16 tn` | 33 | 18.405140 |
+| FP16 B8 | `cutlass wmma f16 32x32x16 tn` | 128 | 16.487412 |
+| FP16 B8 | `cmix_sparse_spmv_relu_rows_t512_kernel` | 32 | 5.136401 |
+| FP16 B8 | `cutlass wmma f16 16x16x16 nn` | 190 | 1.029485 |
+| FP16 B8 | `wkv_fp16_one_cp_kernel` | 32 | 0.568317 |
+| FP16 B8 | `cutlass tensorop f16 64x64 nn` | 32 | 0.543995 |
+| FP16 B64 | `cutlass wmma f16 32x32x16 tn` | 128 | 19.075911 |
+| FP16 B64 | `ampere fp16 s1688gemm 256x64 tn` | 32 | 16.974875 |
+| FP16 B64 | `cutlass f16 relu 256x64 tn` | 32 | 16.398361 |
+| FP16 B64 | `wkv_fp16_one_cp_kernel` | 32 | 6.378825 |
 
-The corrected profile no longer shows an extra 8 ms B8 kernel class: kernel sums are
-23.675010 ms (B4) and 23.734593 ms (B8), while the end-to-end benchmark difference
-is only 0.5748 ms (24.7956 vs 24.2208 ms). The old B8 discrepancy was a stale
-profile captured before the M=5..8 GEMM<16> dispatch; that A/B test measured 35.6344
-ms versus 36.4349 ms. At B64, the dominant kernels are packed BM64 INT8 GEMM
-(25.099521 ms), dense RawKN FFN-value (12.601412 ms), and WKV (7.559697 ms).
-Together they explain the roughly 23 ms above the approximately 27 ms bandwidth floor; the remaining gap is
-distributed across rank, layer-norm, and launch work rather than one missing kernel.
+The corrected profile no longer shows an extra 8 ms B8 kernel class: current kernel
+sums are 23.677919 ms (B4) and 23.738567 ms (B8), while the cache-hit end-to-end
+benchmark difference is 0.5761 ms (24.8054 vs 24.2293 ms). The old B8 discrepancy
+was a stale profile captured before the M=5..8 GEMM<16> dispatch; that A/B test
+measured 35.6344 ms versus 36.4349 ms. At B64, the new BM64xBN128 layout moves the
+dominant Packed GEMM to 18.885829 ms; WKV is 7.390786 ms, RawKN BM64xBN128 is
+4.479509 ms, and the measured sparse value kernels total 4.474198 ms. The final
+three-stage capture's kernel sum is 39.206702 ms over 956 kernel
+instances versus 40.7663 ms wall time, leaving about 1.56 ms outside kernels and
+no unexplained 20 ms kernel class.
 
 ## 6. Gate D: 1024-token prefill
 
@@ -282,29 +289,93 @@ matching the server's prefill-to-first-token sampling point.
 
 | Precision | First-token/prefill ms | Prefill tok/s | Ratio to FP16 |
 |---|---:|---:|---:|
-| FP16 | 512.919 | 1996.42 | 1.0000x |
-| W8A16 | 450.628 | 2272.38 | 0.8786x |
+| FP16 | 512.869 | 1996.61 | 1.0000x |
+| W8A16 | 450.836 | 2271.33 | 0.8786x |
 
-Gate D passes: INT8 is 13.82% faster than FP16 for this prefill case.
+Gate D passes: INT8 is 12.09% faster than FP16 for this prefill case.
 
 ## 7. Gate status
 
 | Gate | Requirement | Result |
 |---|---|---|
-| A | B1 decode <= 25 ms | **Pass**, 20.6011 ms |
-| B | B8 decode <= 32 ms | **Pass**, 24.7850 ms |
-| C1 | B64 decode <= 58 ms | **Pass**, 48.8688 ms |
-| C2 | B16/B32/B64 each >=15% faster than FP16 (TPS gain) | **Pass**, +98.1753% / +62.1913% / +34.7107% |
-| D | 1024-token/chunk-128 INT8 first token <= FP16 | **Pass**, 450.628 ms vs 512.919 ms |
+| A | B1 decode <= 25 ms | **Pass**, 20.6220 ms |
+| B | B8 decode <= 32 ms | **Pass**, 24.8054 ms |
+| C1 | B64 decode <= 58 ms | **Pass**, 40.7663 ms |
+| C2 | B16/B32/B64 each >=15% faster than FP16 (TPS gain) | **Pass**, +95.4843% / +72.1634% / +61.4574% |
+| D | 1024-token/chunk-128 INT8 first token <= FP16 | **Pass**, 450.836 ms vs 512.869 ms |
 
 Focused validation after the final code build:
 
 ```text
 ctest --test-dir build89 -R 'rwkv_(w8a16_kernels|quantized_archive|cuda_non4096_kernels)_test' --output-on-failure
-3/3 passed (rwkv_w8a16_kernels_test: 46.69 s)
+3/3 passed (rwkv_w8a16_kernels_test: 46.43 s; total 46.77 s)
 ```
 
 An additional `CMAKE_CUDA_ARCHITECTURES=75` configure and full build completed in
 `build75`, confirming the sm75 fallback compiles (the BM128 MMA path is selected only
-for sm80+). The HTTP server target is not built because Drogon is unavailable in this
-environment.
+for sm80+).
+
+## 8. HTTP service measurement
+
+Drogon is now installed on Arch and the HTTP target was rebuilt in `build89`. FP16 and
+INT8 were measured sequentially because both models do not fit simultaneously in the
+4060 Ti 16 GB. Each service received one warmup request followed by five measured
+requests with the same body: `POST /v1/chat/completions`, prompt
+`请用一段简短中文说明矩阵乘法的作用。`, `temperature=0.001`, `top_k=1`,
+`top_p=1`, `max_tokens=64`, and `stream=false`. The prompt token count was 31 and
+every response generated 64 tokens.
+
+| Service | Median wall time (s) | End-to-end TPS | `/v1/server/status` decode TPS |
+|---|---:|---:|---:|
+| FP16 | 2.493964 | 25.661953 | 26.322043 |
+| W8A16 INT8 | 1.358769 | 47.101447 | 48.559672 |
+
+TPS is `generated_tokens / median wall time`; the end-to-end TPS gain is
+`(INT8 TPS / FP16 TPS - 1) * 100 = 83.5458%` (`1.8355x`). The status decode TPS
+excludes HTTP request/response and prefill work; its gain is `84.4829%` (`1.8448x`).
+The corresponding end-to-end wall-time reduction is `45.5177%`. A five-sample
+INT8 SSE check (`stream=true`, `curl -N`) had median 1.359492 s (47.0764 tok/s);
+the stream terminated with `data: [DONE]`.
+
+The three fixed prompts were also run sequentially against both services with the
+same greedy settings. The comparison is character-level agreement of the returned
+64-token text, not a token-logit equality test:
+
+| Prompt | Agreement | First differing character |
+|---|---:|---:|
+| Chinese matrix explanation | 1.000 | none |
+| English sky dialogue | 0.064 | 2 |
+| C++ code explanation | 0.689 | 61 |
+
+Autoregressive HTTP outputs can diverge after the first numerical difference; the
+teacher-forced per-token logit MSE and top-1 result remain in Section 3. The service
+rejects `temperature=0` (valid range starts at 0.001), so
+`tools/calibration/check_int8_agreement.py` uses `temperature=0.001`. The full
+`test/api_endpoints_test.sh` smoke test passed against the rebuilt FP16 service.
+The later BM64 three-stage change only dispatches batched `M=17..64` linear layers;
+these sequential B=1 HTTP measurements use the unchanged GEMV path and remain
+applicable to the service baseline.
+
+## 9. Review follow-up A/B
+
+These measurements use the fixed random-sequence benchmark on the RTX 4060 Ti. Nsight
+Compute could not read hardware counters (`ERR_NVGPUCTRPERM`), so kernel resources and
+Nsight Systems CUDA timing were used instead.
+
+| Item | Measurement | Decision |
+|---|---|---|
+| P1/P4 BM64 epilogue | Existing BM128 for M<=64 regressed B64 to 60.07 ms; a new BM64xBN128 layout with (M,N) warp tiling and no cross-warp reduction passed random numerical coverage. Reducing this kernel's async stages 4→3 then measured 40.77 ms cache-hit wall time (about 0.7% faster) | Keep |
+| P6 attention grid | For the 4096x4096 attention shape, BN128 changes the N grid from 64 to 32 blocks; this is included in the BM64xBN128 result rather than measured separately | Covered by P1/P4 |
+| P2 WKV launch bounds | `__launch_bounds__(64,2)` kept 108 registers/thread; B64 change was within noise (INT8 49.01 -> 48.88 ms, FP16 65.85 -> 65.83 ms) | Reverted |
+| P3 cache policy | Weight `evict_first` plus x `cache` regressed INT8 B64 to 49.55 ms. x `cache`, weight policy unchanged, measured about 48.84--48.85 ms | Keep x policy only |
+| P5 BM64 occupancy | For the new Packed BM64xBN128 kernel, launch bounds 1 -> 2 reduced registers 98 -> 90 with no spill; B64 improved about 0.3--0.4%. A separate 4→3 async-stage A/B improved B64 by another ~0.7% | Keep `(256,2)` and 3 stages |
+| P7 per-layer cmix | With the pre-small-M kernel, per-layer rows measured 34.2085 ms at B32 and 40.7663 ms at B64; forcing every layer to threshold 32 measured 36.3233 and 41.3410 ms (about 6.2% and 1.4% slower) | Keep measured layer map in tune cache |
+| P8 M>128 BM128 | With chunk=256 prefill, INT8 BM64 fallback was 596.5 ms; BM128 arbitrary-M path was 459.3 ms (about -23%) | Keep |
+| P9 split-K | ffn.value M=32 split 1 vs 4 changed full B64 by about 0.2 ms (<1%) | Keep tuner choice |
+| P10 launch gaps | Final three-stage B64 capture measured kernel sum 39.2067 ms (956 launches) versus 40.7663 ms wall time; about 1.56 ms was outside kernels. Graph capture still needs stable per-request state/input pointers | No graph change |
+| Small-M BM64×BN128 | Routing both M=16 and M=32 to the new kernel changed medians (two runs each) from 28.7038 to 29.4487 ms at B16 (+2.60%) and from 34.2084 to 33.7791 ms at B32 (-1.25%). A selective M=32-only route retained B16 at 28.6988 ms and measured B32 at 33.8133 ms (-1.17% versus A). | Keep M=32 route; leave M=16 on gemm<16> |
+
+Final post-change decode table (cache hit): INT8 B1/B2/B4/B8/B16/B32/B64 =
+20.62/21.82/24.23/24.81/28.69/33.81/40.77 ms; FP16 is
+38.07/39.90/43.67/46.19/56.08/58.89/65.82 ms. The new BM64xBN128 kernel was
+validated by the Packed/KN numerical test before these numbers were taken.

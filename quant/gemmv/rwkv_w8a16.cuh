@@ -12,7 +12,7 @@ enum class W8BLayout {
   PackedNK,
 };
 
-inline constexpr int kTuneVersion = 1;
+inline constexpr int kTuneVersion = 4;
 
 struct W8A16DeviceInfo {
   int sm_count = 1;
