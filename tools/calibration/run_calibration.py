@@ -22,7 +22,7 @@ def main():
     parser.add_argument("--fp16-model", required=True)
     parser.add_argument("--int8-model", required=True)
     parser.add_argument("--bandwidth", default="build/rwkv_calibration_bandwidth")
-    parser.add_argument("--report", default="tools/calibration/REPORT.md")
+    parser.add_argument("--report", default="tmp/W8A16_REPORT.md")
     args = parser.parse_args()
     lines = ["# W8A16 calibration report", "", f"Date: {time.strftime('%Y-%m-%d %H:%M:%S')}", ""]
     for label, model in (("FP16", args.fp16_model), ("W8A16", args.int8_model)):
@@ -40,7 +40,9 @@ def main():
         "after starting the rebuilt Drogon-backed HTTP target. The target is omitted only",
         "when Drogon is unavailable at configure time.",
     ])
-    pathlib.Path(args.report).write_text("\n".join(lines) + "\n", encoding="utf-8")
+    report_path = pathlib.Path(args.report)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":

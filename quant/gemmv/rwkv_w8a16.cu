@@ -1429,6 +1429,11 @@ void rwkv7_w8a16_linear_launch(
   assert(K % 64 == 0);
   const int major = cached_device_info().compute_major;
   if (major >= 8 && (layout == W8BLayout::PackedNK || layout == W8BLayout::KN)) {
+    // This exact M=32 boundary is measured, not a typo: BM64xBN128 regresses
+    // M=16 by 2.60% (28.7038 -> 29.4487 ms) but improves M=32 by 1.17%
+    // (34.2084 -> 33.8133 ms), placing the crossover between 16 and 32.
+    // M=17..31 remain conservatively on gemm<32>; dynamic batching should A/B
+    // M=20/24/28 before widening this condition.
     if (M == 32 && N % 128 == 0) {
       if (layout == W8BLayout::PackedNK) {
         launch_mma_bm64_bn128<true>(stream, M, K, N, x, qweight, scale, y,
