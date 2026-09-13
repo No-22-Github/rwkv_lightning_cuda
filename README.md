@@ -1,23 +1,44 @@
-## CI / Release
+<div align="center">
+  <img src="assets/banner.png" alt="RWKV Lightning CUDA — Inference · State Tuning · Quantization · Web UI" width="820">
 
-GitHub Actions builds Linux and Windows CUDA packages on PRs and `main`. Push a
-`v*` tag to generate a draft Release with binaries and SHA-256 checksums. See
-[the release guide](docs/releasing.md) for the workflow and package contents.
+  [![CI and Release](https://github.com/No-22-Github/rwkv_lightning_cuda/actions/workflows/ci.yml/badge.svg)](https://github.com/No-22-Github/rwkv_lightning_cuda/actions/workflows/ci.yml)
+  ![Platform](https://img.shields.io/badge/platform-Linux%20%C2%B7%20Windows-blue)
+  ![CUDA](https://img.shields.io/badge/CUDA-12.9%20%C2%B7%2013.2-76B900)
+</div>
 
-## Project layout
+# RWKV Lightning CUDA
 
-The native code is organized by responsibility:
+High-performance RWKV-7 inference server for NVIDIA CUDA GPUs, with an AMD HIP
+fallback path. It ships OpenAI-style and native batch APIs with streaming SSE,
+an L1/L2/SQLite session state cache, W8A16/W4A16 quantized serving, standalone
+state tuning, a multi-backend Go router, and a Go desktop launcher with a Web UI.
 
-- `include/rwkv/`: public headers grouped into `common`, `io`, `runtime`, `inference`, and `server` APIs.
-- `src/backend/`: GPU model backend integration.
-- `src/inference/`: tokenization, sampling, and generation orchestration.
-- `src/io/`: PTH archive and tensor readers.
-- `src/server/`: HTTP API, model routing, admission control, and state storage.
-- `src/app/`: executable entry points.
-- `assets/`: runtime data files such as the tokenizer vocabulary.
-- `cmake/`: dependency, compiler-option, and packaging modules.
+- **Fast prefill and decode** — chunked prefill with VRAM-adaptive admission control, SSE streaming with configurable chunk size.
+- **Session state cache** — reuse conversation states across L1 VRAM, L2 RAM, and SQLite persistence; uploaded `.pth` states work with every generation endpoint.
+- **Quantization** — W4A16/W8A16 `.rwkvq` checkpoints with packed INT4/INT8 weights on device.
+- **State tuning** — train `time_state` blocks standalone from JSONL data without touching linear weights.
+- **Batteries included** — weighted least-inflight load-balancing router and a desktop launcher with Web UI.
 
-The root `CMakeLists.txt` only selects the GPU backend and composes these modules. Target definitions live next to their corresponding source trees in `src/CMakeLists.txt`, `tools/CMakeLists.txt`, and `test/CMakeLists.txt`.
+## Quick Start
+
+```bash
+cmake -S . -B ./build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CUDA_ARCHITECTURES="75;80;86;87;89;90;100;120"
+cmake --build ./build -j --config Release --target bundle_all
+
+./build/bundle/rwkv_lighting_cuda/rwkv_lighting_cuda \
+  --model-path /path/to/model.pth \
+  --vocab-path ./assets/rwkv_vocab_v20230424.txt \
+  --host 127.0.0.1 \
+  --port 8000
+```
+
+Verify the server is up:
+
+```bash
+curl -sS "http://127.0.0.1:8000/v1/server/status"
+```
+
+Windows, AMD ROCm, and quantization builds are described under [Build](#build).
 
 ## Build
 
@@ -55,7 +76,8 @@ attention projections, FFN projections, and the output head. W4 also supports
 two-positional-argument commands still export W8A16. HIP builds continue to use
 the BF16/PTH path.
 
-Windows
+### Windows
+
 ```bash
 $env:CudaToolkitDir="C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2\"
 cmake -S . -B ./build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CUDA_ARCHITECTURES="75;80;86;87;89;90;100;120" -DCMAKE_TOOLCHAIN_FILE="D:/vcpkg/scripts/buildsystems/vcpkg.cmake"  -DCMAKE_CXX_FLAGS="/Zc:preprocessor" -DCMAKE_CUDA_FLAGS="-Xcompiler=/Zc:preprocessor"
@@ -63,12 +85,14 @@ cmake -S . -B ./build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CUDA_ARCHITECTURES="75;
 cmake --build ./build --config Release -j --target bundle_rwkv_quantize bundle_rwkv_lighting_cuda
 ```
 
-AMD ROCm
+### AMD ROCm (HIP)
+
 ```bash
 cmake -S . -B build-hip -DRWKV_GPU_BACKEND=HIP -DCMAKE_BUILD_TYPE=Release
 cmake --build build-hip -j
 ```
-Compile Go Web Frontend
+
+### Go Web Frontend (launcher)
 
 ```bash
 ## Linux
@@ -79,37 +103,7 @@ go build -trimpath -ldflags="-s -w" -o .\rwkv_launcher.exe .\main.go
 ```
 ## Run
 
-### Standalone state tuning (CUDA)
-
-With `RWKV7_STATE_TUNING=ON` (the default for CUDA builds), the standalone
-`rwkv_state_tune` binary trains only `blocks.N.att.time_state` from JSONL rows
-of the form `{"text":"..."}`:
-
-```bash
-./build/rwkv_state_tune \
-  --model /path/to/model.pth \
-  --data /path/to/train.jsonl \
-  --output ./state_output \
-  --ctx 128 \
-  --chunk 128 \
-  --epochs 1 \
-  --max-steps 10000 \
-  --lr 1.0 \
-  --lr-final 0.01 \
-  --warmup-steps 10 \
-  --save-every 500 \
-  --batch-size 2
-```
-
-This first correctness-oriented version uses the existing BF16 PTH loader and
-its FP16 runtime weights and rejects INT8 training. Samples are truncated at
-`--ctx`; `--chunk` controls checkpoint/recompute length with reverse state
-gradient propagation. `--batch-size N` accumulates N variable-length samples
-per optimizer update. Checkpoints contain only state tensors and can be uploaded to the
-existing inference backend. See `src/state_tuning/README.md` for implementation
-details.
-
-Run server
+### Run server
 
 ```bash
 ./build/rwkv_lighting_cuda \
@@ -137,6 +131,21 @@ Generation requests enter a FIFO admission queue. The server dynamically refresh
 available prefill batch-size limit from free VRAM and admits requests when capacity is
 available. `/v1/server/status` reports `prefill_queue` and all `active_requests` while
 retaining `active_request` for compatibility.
+
+The server binds to `127.0.0.1` by default. Use `--host 0.0.0.0` only when
+you intentionally want to listen on all IPv4 interfaces.
+
+### Run on Windows
+
+```bash
+cd build\bundle\rwkv_lighting_cuda;
+set "SCRIPT_DIR=%~dp0\";
+.\build/rwkv_lighting_cuda \
+  --model-path /path/to/model.pth \
+  --vocab-path /path/to/rwkv_vocab_v20230424.txt \
+  --host 127.0.0.1 \
+  --port 8000
+```
 
 ### Dynamic model loading
 
@@ -168,23 +177,41 @@ Concurrent inference shares that loaded model. Different load requests are FIFO
 queued; a switch waits for active inference to finish, releases the old model
 from VRAM, and then loads the selected model.
 
-If use windows 
+### Standalone state tuning (CUDA)
+
+With `RWKV7_STATE_TUNING=ON` (the default for CUDA builds), the standalone
+`rwkv_state_tune` binary trains only `blocks.N.att.time_state` from JSONL rows
+of the form `{"text":"..."}`:
+
 ```bash
-cd build\bundle\rwkv_lighting_cuda;
-set "SCRIPT_DIR=%~dp0\";
-.\build/rwkv_lighting_cuda \
-  --model-path /path/to/model.pth \
-  --vocab-path /path/to/rwkv_vocab_v20230424.txt \
-  --host 127.0.0.1 \
-  --port 8000
+./build/rwkv_state_tune \
+  --model /path/to/model.pth \
+  --data /path/to/train.jsonl \
+  --output ./state_output \
+  --ctx 128 \
+  --chunk 128 \
+  --epochs 1 \
+  --max-steps 10000 \
+  --lr 1.0 \
+  --lr-final 0.01 \
+  --warmup-steps 10 \
+  --save-every 500 \
+  --batch-size 2
 ```
 
-The server binds to `127.0.0.1` by default. Use `--host 0.0.0.0` only when
-you intentionally want to listen on all IPv4 interfaces.
+This first correctness-oriented version uses the existing BF16 PTH loader and
+its FP16 runtime weights and rejects INT8 training. Samples are truncated at
+`--ctx`; `--chunk` controls checkpoint/recompute length with reverse state
+gradient propagation. `--batch-size N` accumulates N variable-length samples
+per optimizer update. Checkpoints contain only state tensors and can be uploaded to the
+existing inference backend. See `src/state_tuning/README.md` for implementation
+details.
 
 ## HTTP API examples
 
-The examples below assume the server is running on port `8000`.
+The complete endpoint reference (in Chinese) lives in
+[rwkv_lightning_api_doc.md](rwkv_lightning_api_doc.md). The examples below
+assume the server is running on port `8000`.
 If the server was started with `--password`, pass either a Bearer token header or the `password` field in JSON:
 
 ```bash
@@ -499,3 +526,31 @@ The server accepts `OPTIONS` on API routes for browser clients. Depending on the
 ```bash
 curl -sS -i -X OPTIONS "http://127.0.0.1:8000/v1/chat/completions"
 ```
+
+## Multi-backend router
+
+`RWKV_Lightning_CUDA_router/` is an optional Go reverse proxy that spreads
+inference across several GPU servers with weighted least-inflight scheduling,
+session affinity for stateful traffic, and fan-out synchronization of uploaded
+states. See [its README](RWKV_Lightning_CUDA_router/README.md) for configuration.
+
+## CI / Release
+
+GitHub Actions builds Linux and Windows CUDA packages on PRs and `main`. Push a
+`v*` tag to generate a draft Release with binaries and SHA-256 checksums. See
+[the release guide](docs/releasing.md) for the workflow and package contents.
+
+## Project layout
+
+The native code is organized by responsibility:
+
+- `include/rwkv/`: public headers grouped into `common`, `io`, `runtime`, `inference`, and `server` APIs.
+- `src/backend/`: GPU model backend integration.
+- `src/inference/`: tokenization, sampling, and generation orchestration.
+- `src/io/`: PTH archive and tensor readers.
+- `src/server/`: HTTP API, model routing, admission control, and state storage.
+- `src/app/`: executable entry points.
+- `assets/`: runtime data files such as the tokenizer vocabulary, plus the README banner image.
+- `cmake/`: dependency, compiler-option, and packaging modules.
+
+The root `CMakeLists.txt` only selects the GPU backend and composes these modules. Target definitions live next to their corresponding source trees in `src/CMakeLists.txt`, `tools/CMakeLists.txt`, and `test/CMakeLists.txt`.
