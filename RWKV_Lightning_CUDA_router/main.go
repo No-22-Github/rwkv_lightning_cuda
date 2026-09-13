@@ -339,7 +339,7 @@ func requestStateID(r *http.Request, body []byte) string {
 		stateID = r.URL.Query().Get("state_id")
 	}
 	if stateID == "" {
-		stateID = strings.TrimSpace(r.Header.Get("X-State-Id"))
+		stateID = strings.TrimSpace(r.Header.Get("X-RWKV-State-Id"))
 	}
 	return stateID
 }
@@ -390,7 +390,7 @@ func batchSize(r *http.Request, body []byte) (int64, string) {
 		_ = json.Unmarshal(raw, &session)
 	}
 	if session == "" {
-		session = strings.TrimSpace(r.Header.Get("X-Session-Id"))
+		session = strings.TrimSpace(r.Header.Get("X-RWKV-Session-Id"))
 	}
 	for _, key := range []string{"contents", "text_list", "prompts", "inputs"} {
 		var values []json.RawMessage

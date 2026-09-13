@@ -32,7 +32,7 @@ func TestBatchSize(t *testing.T) {
 
 func TestBatchSizeSessionHeaderFallback(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/state/chat/completions", nil)
-	req.Header.Set("X-Session-Id", "session-header")
+	req.Header.Set("X-RWKV-Session-Id", "session-header")
 	if _, got := batchSize(req, []byte(`{"contents":["a"]}`)); got != "session-header" {
 		t.Fatalf("header fallback got %q", got)
 	}
@@ -44,7 +44,7 @@ func TestBatchSizeSessionHeaderFallback(t *testing.T) {
 		t.Fatalf("no channel got %q", got)
 	}
 	other := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
-	other.Header.Set("X-Session-Id", "session-header")
+	other.Header.Set("X-RWKV-Session-Id", "session-header")
 	if _, got := batchSize(other, nil); got != "" {
 		t.Fatalf("non-affinity path must not read session headers, got %q", got)
 	}
@@ -103,7 +103,7 @@ func TestRequestStateID(t *testing.T) {
 		t.Fatalf("query fallback got %q", got)
 	}
 	req.URL.RawQuery = ""
-	req.Header.Set("X-State-Id", "state-header")
+	req.Header.Set("X-RWKV-State-Id", "state-header")
 	if got := requestStateID(req, []byte(`{}`)); got != "state-header" {
 		t.Fatalf("header fallback got %q", got)
 	}
@@ -111,7 +111,7 @@ func TestRequestStateID(t *testing.T) {
 		t.Fatalf("body alone got %q", got)
 	}
 	upload := httptest.NewRequest(http.MethodPost, "/v1/state/upload", nil)
-	upload.Header.Set("X-State-Id", "state-header")
+	upload.Header.Set("X-RWKV-State-Id", "state-header")
 	if got := requestStateID(upload, nil); got != "" {
 		t.Fatalf("upload must not read state ids, got %q", got)
 	}
@@ -143,7 +143,7 @@ func TestProxySessionHeaderAffinity(t *testing.T) {
 	}
 	for i := 0; i < 2; i++ {
 		req := httptest.NewRequest(http.MethodPost, "/state/chat/completions", strings.NewReader(`{"contents":["hi"]}`))
-		req.Header.Set("X-Session-Id", "session-header")
+		req.Header.Set("X-RWKV-Session-Id", "session-header")
 		resp := httptest.NewRecorder()
 		p.ServeHTTP(resp, req)
 		if resp.Code != http.StatusOK {

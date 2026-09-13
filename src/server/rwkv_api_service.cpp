@@ -392,8 +392,17 @@ bool check_password(
   return false;
 }
 
-constexpr const char* kSessionIdHeader = "X-Session-Id";
-constexpr const char* kStateIdHeader = "X-State-Id";
+constexpr const char* kSessionIdHeader = "X-RWKV-Session-Id";
+constexpr const char* kStateIdHeader = "X-RWKV-State-Id";
+
+std::string trim(const std::string& input) {
+  const auto begin = input.find_first_not_of(" \t\r\n");
+  if (begin == std::string::npos) {
+    return {};
+  }
+  const auto end = input.find_last_not_of(" \t\r\n");
+  return input.substr(begin, end - begin + 1);
+}
 
 // Reads a request header under both the documented and the all-lowercase wire
 // name, mirroring bearer_token(); older drogon builds look headers up
@@ -425,24 +434,29 @@ std::string session_id_from_body(const Json::Value& body) {
 }
 
 // Resolves an identifier that may arrive through several channels (JSON body,
-// request header, query string). More than one channel carrying a value is
-// ambiguous, so the request fails instead of silently picking one.
+// request header, query string). Repeating the same value across channels is
+// harmless; conflicting values are ambiguous, so the request fails instead of
+// silently picking one.
 std::string resolve_identifier(
     std::initializer_list<std::pair<std::string, std::string>> channels,
     const std::string& field) {
   std::string value;
   std::string used;
   for (const auto& channel : channels) {
-    if (channel.second.empty()) {
+    const std::string current = trim(channel.second);
+    if (current.empty()) {
       continue;
     }
     if (!used.empty()) {
+      if (current == value) {
+        continue;
+      }
       throw std::runtime_error(
-          field + " supplied through both " + used + " and " + channel.first +
-          "; use only one of them");
+          field + " has conflicting values in " + used + " and " +
+          channel.first + "; use only one of them");
     }
     used = channel.first;
-    value = channel.second;
+    value = current;
   }
   return value;
 }
@@ -1027,7 +1041,7 @@ void register_api_routes_legacy(
   app.registerPostHandlingAdvice([](const HttpRequestPtr&, const HttpResponsePtr& resp) {
     resp->addHeader("Access-Control-Allow-Origin", "*");
     resp->addHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
-    resp->addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Session-Id, X-State-Id");
+    resp->addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-RWKV-Session-Id, X-RWKV-State-Id");
   });
 
   auto handle_options = [](const HttpRequestPtr&, std::function<void(const HttpResponsePtr&)>&& cb) {
@@ -1866,7 +1880,7 @@ void register_api_routes(
   app.registerPostHandlingAdvice([](const HttpRequestPtr&, const HttpResponsePtr& resp) {
     resp->addHeader("Access-Control-Allow-Origin", "*");
     resp->addHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
-    resp->addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Session-Id, X-State-Id");
+    resp->addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-RWKV-Session-Id, X-RWKV-State-Id");
   });
   const auto options_handler = [](const HttpRequestPtr&, std::function<void(const HttpResponsePtr&)>&& cb) {
     auto resp = HttpResponse::newHttpResponse();

@@ -120,9 +120,10 @@ Omit `state_id` to use the normal zero-initialized state. All inference
 endpoints accept the same string field: `/v1/chat/completions`,
 `/v1/batch/completions`, `/translate/v1/batch-translate`, and
 `/state/chat/completions`. Every endpoint above also accepts `state_id`
-through an `X-State-Id` request header instead of the JSON body; supplying it
-in both places returns HTTP 400 (`/v1/state/delete` additionally accepts
-`?state_id=...` in the query string under the same conflict rule). For a batch
+through an `X-RWKV-State-Id` request header instead of the JSON body; conflicting
+values across channels return HTTP 400, while repeating the same value is
+accepted (`/v1/state/delete` additionally accepts `?state_id=...` in the query
+string under the same rule). For a batch
 request, the uploaded state is copied
 to every batch slot before its prompt is evaluated. On the stateful endpoint,
 an explicit uploaded state takes precedence over the cached `session_id`
@@ -226,7 +227,7 @@ curl -sS -X POST "http://127.0.0.1:8000/translate/v1/batch-translate" \
 
 ## Stateful completions
 
-Use `session_id` to reuse and update a saved RWKV state. This endpoint accepts exactly one prompt in `contents`. `session_id` may also be passed through an `X-Session-Id` request header (also honored by `/state/delete`); providing it in both the body and the header returns HTTP 400.
+Use `session_id` to reuse and update a saved RWKV state. This endpoint accepts exactly one prompt in `contents`. `session_id` may also be passed through an `X-RWKV-Session-Id` request header (also honored by `/state/delete`); conflicting values between the body and the header return HTTP 400, while repeating the same value is accepted.
 
 ```bash
 

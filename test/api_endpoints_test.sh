@@ -396,8 +396,8 @@ assert_contains "$TMPDIR/state-delete.json" '"status":'
 
 header_session_id="api-test-header-$(date +%s)-$$"
 
-log "POST /state/chat/completions with X-Session-Id header"
-request_with_header POST "/state/chat/completions" "X-Session-Id: $header_session_id" '{
+log "POST /state/chat/completions with X-RWKV-Session-Id header"
+request_with_header POST "/state/chat/completions" "X-RWKV-Session-Id: $header_session_id" '{
   "contents":["User: remember the word albatross.\nAssistant:"],
   "stream":false,
   "max_tokens":8,
@@ -412,30 +412,38 @@ request_with_header POST "/state/chat/completions" "X-Session-Id: $header_sessio
 }' "$TMPDIR/state-chat-header.json"
 assert_contains "$TMPDIR/state-chat-header.json" '"choices":'
 
-log "POST /state/chat/completions rejects session_id in both body and header"
-request_with_header POST "/state/chat/completions" "X-Session-Id: $header_session_id" "{
+log "POST /state/chat/completions accepts identical session_id in body and header"
+request_with_header POST "/state/chat/completions" "X-RWKV-Session-Id: $header_session_id" "{
+  \"session_id\":\"$header_session_id\",
+  \"contents\":[\"User: continue.\nAssistant:\"],
+  \"max_tokens\":8
+}" "$TMPDIR/state-chat-same-value.json"
+assert_contains "$TMPDIR/state-chat-same-value.json" '"choices":'
+
+log "POST /state/chat/completions rejects conflicting session_id values"
+request_with_header POST "/state/chat/completions" "X-RWKV-Session-Id: ${header_session_id}-other" "{
   \"session_id\":\"$header_session_id\",
   \"contents\":[\"User: continue.\nAssistant:\"],
   \"max_tokens\":8
 }" "$TMPDIR/state-chat-conflict.json" 400
-assert_contains "$TMPDIR/state-chat-conflict.json" 'through both'
+assert_contains "$TMPDIR/state-chat-conflict.json" 'conflicting values'
 
-log "POST /state/delete with X-Session-Id header"
-request_with_header POST "/state/delete" "X-Session-Id: $header_session_id" '{}' "$TMPDIR/state-delete-header.json"
+log "POST /state/delete with X-RWKV-Session-Id header"
+request_with_header POST "/state/delete" "X-RWKV-Session-Id: $header_session_id" '{}' "$TMPDIR/state-delete-header.json"
 assert_contains "$TMPDIR/state-delete-header.json" '"status":"success"'
 
-log "POST /v1/chat/completions rejects state_id in both body and header"
-request_with_header POST "/v1/chat/completions" "X-State-Id: api-test-missing-state.pth" '{
+log "POST /v1/chat/completions rejects conflicting state_id values"
+request_with_header POST "/v1/chat/completions" "X-RWKV-State-Id: api-test-missing-state-other.pth" '{
   "model":"api-test",
   "messages":[{"role":"user","content":"Say hi."}],
   "state_id":"api-test-missing-state.pth",
   "stream":false,
   "max_tokens":8
 }' "$TMPDIR/chat-state-conflict.json" 400
-assert_contains "$TMPDIR/chat-state-conflict.json" 'through both'
+assert_contains "$TMPDIR/chat-state-conflict.json" 'conflicting values'
 
-log "POST /v1/chat/completions resolves state_id from X-State-Id header"
-request_with_header POST "/v1/chat/completions" "X-State-Id: api-test-missing-state.pth" '{
+log "POST /v1/chat/completions resolves state_id from X-RWKV-State-Id header"
+request_with_header POST "/v1/chat/completions" "X-RWKV-State-Id: api-test-missing-state.pth" '{
   "model":"api-test",
   "messages":[{"role":"user","content":"Say hi."}],
   "stream":false,
@@ -443,10 +451,16 @@ request_with_header POST "/v1/chat/completions" "X-State-Id: api-test-missing-st
 }' "$TMPDIR/chat-state-header-missing.json" 400
 assert_contains "$TMPDIR/chat-state-header-missing.json" 'uploaded state not found'
 
-log "POST /v1/state/delete rejects state_id in both body and header"
-request_with_header DELETE "/v1/state/delete" "X-State-Id: api-test-missing-state.pth" \
+log "DELETE /v1/state/delete accepts identical state_id in body, header, and query"
+request_with_header DELETE "/v1/state/delete?state_id=api-test-missing-state.pth" \
+  "X-RWKV-State-Id: api-test-missing-state.pth" \
+  '{"state_id":"api-test-missing-state.pth"}' "$TMPDIR/state-delete-same-value.json" 404
+assert_contains "$TMPDIR/state-delete-same-value.json" '"deleted":false'
+
+log "DELETE /v1/state/delete rejects conflicting state_id values"
+request_with_header DELETE "/v1/state/delete" "X-RWKV-State-Id: api-test-missing-state-other.pth" \
   '{"state_id":"api-test-missing-state.pth"}' "$TMPDIR/state-delete-conflict.json" 400
-assert_contains "$TMPDIR/state-delete-conflict.json" 'through both'
+assert_contains "$TMPDIR/state-delete-conflict.json" 'conflicting values'
 
 log "POST /v1/server/stop during active stream"
 stream_request "/v1/chat/completions" "{

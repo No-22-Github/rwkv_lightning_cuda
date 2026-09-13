@@ -112,9 +112,9 @@ curl -sS -X POST "http://127.0.0.1:8000/v1/chat/completions" \
 
 省略 `state_id` 则使用常规的零初始化 state。所有推理接口都接受同一字符串字段：
 `/v1/chat/completions`、`/v1/batch/completions`、`/translate/v1/batch-translate` 与
-`/state/chat/completions`。上述每个接口还支持通过 `X-State-Id` 请求头（代替 JSON
-请求体）传递 `state_id`；请求体与请求头同时提供会返回 HTTP 400
-（`/v1/state/delete` 额外支持 query 串中的 `?state_id=...`，适用同一冲突规则）。
+`/state/chat/completions`。上述每个接口还支持通过 `X-RWKV-State-Id` 请求头（代替 JSON
+请求体）传递 `state_id`；各通道给出互相冲突的值会返回 HTTP 400，重复相同值则接受
+（`/v1/state/delete` 额外支持 query 串中的 `?state_id=...`，适用同一规则）。
 对 batch 请求，上传的 state 会在评估每条 prompt 前复制到每个批次槽位。在有状态接口
 上，显式上传的 state 在该请求中优先于缓存的 `session_id` state，生成后的 state 会
 回写进会话缓存。携带 `state_id` 的聊天请求默认使用不带思考前缀的经典
@@ -215,8 +215,8 @@ curl -sS -X POST "http://127.0.0.1:8000/translate/v1/batch-translate" \
 ## 有状态补全
 
 通过 `session_id` 复用并更新已保存的 RWKV state。该接口只接受一条 `contents`
-prompt。`session_id` 也可以通过 `X-Session-Id` 请求头传递（`/state/delete` 同样
-支持）；请求体与请求头同时提供会返回 HTTP 400。
+prompt。`session_id` 也可以通过 `X-RWKV-Session-Id` 请求头传递（`/state/delete` 同样
+支持）；请求体与请求头给出互相冲突的值会返回 HTTP 400，重复相同值则接受。
 
 ```bash
 
