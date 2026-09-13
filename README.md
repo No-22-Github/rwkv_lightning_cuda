@@ -2,12 +2,13 @@
   <img src="assets/banner.png" alt="RWKV Lightning CUDA — Inference · State Tuning · Quantization · Web UI" width="820">
 
   [![CI and Release](https://github.com/No-22-Github/rwkv_lightning_cuda/actions/workflows/ci.yml/badge.svg)](https://github.com/No-22-Github/rwkv_lightning_cuda/actions/workflows/ci.yml)
-  [![Release](https://img.shields.io/github/v/tag/No-22-Github/rwkv_lightning_cuda?sort=semver&label=release)](https://github.com/No-22-Github/rwkv_lightning_cuda/releases)
   [![Last Commit](https://img.shields.io/github/last-commit/No-22-Github/rwkv_lightning_cuda/main?label=last%20commit)](https://github.com/No-22-Github/rwkv_lightning_cuda/commits/main)
+  <!-- Uncomment after the first tagged release:
+  [![Release](https://img.shields.io/github/v/tag/No-22-Github/rwkv_lightning_cuda?sort=semver&label=release)](https://github.com/No-22-Github/rwkv_lightning_cuda/releases)
+  -->
 
   ![C++ 20](https://img.shields.io/badge/C%2B%2B-20-00599C?logo=cplusplus&logoColor=white)
   ![CUDA](https://img.shields.io/badge/CUDA-12.9%20%C2%B7%2013.2-76B900?logo=nvidia&logoColor=white)
-  ![ROCm / HIP](https://img.shields.io/badge/ROCm-HIP%20ready-E01E27?logo=amd&logoColor=white)
   ![CMake](https://img.shields.io/badge/CMake-3.24%2B-064F8C?logo=cmake&logoColor=white)
   ![Go](https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white)
 </div>
@@ -49,15 +50,14 @@ are described in the [build guide](docs/build.md).
 
 ## Documentation
 
-Every guide is available in English and Chinese; each page links to its
-translation at the top.
+The build, run, and API guides are each available in English and Chinese; every
+page links to its translation at the top.
 
-| Document | Description |
+| Guide | Description |
 |---|---|
-| [Build](docs/build.md) · [构建](docs/build.zh-CN.md) | CMake build for CUDA and ROCm, W8A16/W4A16 quantization tool, Windows notes, Go launcher |
+| [Build](docs/build.md) · [构建](docs/build.zh-CN.md) | CMake build for CUDA and ROCm, W8A16/W4A16 quantization tool, Go launcher; step-by-step [Windows guide](docs/windows-build-run.md) |
 | [Run](docs/run.md) · [运行](docs/run.zh-CN.md) | Server flags, Windows runtime, dynamic model loading, standalone state tuning |
-| [HTTP API](docs/http-api.md) · [HTTP API 中文](docs/http-api.zh-CN.md) | curl examples for every endpoint; complete Chinese reference in [rwkv_lightning_api_doc.md](rwkv_lightning_api_doc.md) |
-| [Windows build & run](docs/windows-build-run.md) | Step-by-step Windows guide verified on RTX 3080 |
+| [HTTP API](docs/http-api.md) · [中文](docs/http-api.zh-CN.md) | curl examples for every endpoint; complete reference in [rwkv_lightning_api_doc.md](rwkv_lightning_api_doc.md) |
 | [Router](RWKV_Lightning_CUDA_router/README.md) | Multi-backend load-balancing reverse proxy with session affinity and state fan-out |
 | [Releasing](docs/releasing.md) | CI packaging matrix and how to publish a versioned release |
 
