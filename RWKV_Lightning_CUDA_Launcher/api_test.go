@@ -189,6 +189,31 @@ func TestMetricsUnavailableIsExplicit(t *testing.T) {
 	}
 }
 
+func TestWrongMethodAndUnknownAPIPaths(t *testing.T) {
+	l := newLauncher()
+	l.clientOnly = true
+	h := l.handler()
+	// Wrong-method requests on /api must answer JSON — never the static
+	// file server's text 404.
+	code, body, raw := callJSON(t, h, "GET", "http://127.0.0.1:10721/api/v1/runtime/start", nil, nil)
+	if code != 404 || body["error"] != "not found" {
+		t.Fatalf("wrong method: %d %s", code, raw)
+	}
+	code, body, raw = callJSON(t, h, "POST", "http://127.0.0.1:10721/api/v1/node", strings.NewReader(`{}`), nil)
+	if code != 404 || body["error"] != "not found" {
+		t.Fatalf("wrong method GET-only: %d %s", code, raw)
+	}
+	code, body, _ = callJSON(t, h, "GET", "http://127.0.0.1:10721/api/v1/nonexistent", nil, nil)
+	if code != 404 || body["error"] != "not found" {
+		t.Fatalf("unknown api path: %d", code)
+	}
+	// Static hosting survives the catch-all.
+	code, _, raw = callJSON(t, h, "GET", "http://127.0.0.1:10721/", nil, nil)
+	if code != 200 || !strings.Contains(raw, "RWKV") {
+		t.Fatalf("static broken: %d", code)
+	}
+}
+
 func TestDialogUnsupportedForRemoteCallers(t *testing.T) {
 	l := newLauncher()
 	l.clientOnly = true

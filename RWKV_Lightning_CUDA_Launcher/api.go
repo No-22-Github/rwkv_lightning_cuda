@@ -77,6 +77,13 @@ func (l *launcher) handler() http.Handler {
 	mux := http.NewServeMux()
 	web, _ := fs.Sub(webFiles, "dist")
 	mux.Handle("/", http.FileServer(http.FS(web)))
+	// Control paths must never fall through to the static file server:
+	// unknown /api paths and wrong-method requests answer with JSON (the
+	// static handler's text 404 would otherwise swallow method mismatches
+	// on the method-specific /api/v1 patterns).
+	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 404, map[string]any{"error": "not found"})
+	})
 
 	// ---- Node (Agent) ----
 	apiV1(mux, "GET /api/v1/node", func(w http.ResponseWriter, r *http.Request) error {
