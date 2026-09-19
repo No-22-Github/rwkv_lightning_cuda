@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -37,8 +38,11 @@ func TestRegistryPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if perm := st.Mode().Perm(); perm != 0o600 {
-		t.Fatalf("registry file mode: %o", perm)
+	if runtime.GOOS != "windows" {
+		// Windows fakes permission bits; the 0600 guarantee is POSIX-only.
+		if perm := st.Mode().Perm(); perm != 0o600 {
+			t.Fatalf("registry file mode: %o", perm)
+		}
 	}
 	data, _ := os.ReadFile(path)
 	if !strings.Contains(string(data), "abc123") {

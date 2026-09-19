@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -108,7 +109,13 @@ func TestDeviceTuneCache(t *testing.T) {
 	req := startRequest{ModelPath: "/data/models/rwkv7-g1i.pth", StateDBPath: "/state/rwkv_sessions.db"}
 	dev := resolvedDevices{spec: "0,1", explicit: true}
 	got := deviceTuneCache(req, dev)
-	want := "/state/rwkv7-g1i.dev-0-1.w8a16.tune"
+	// Mirror the implementation's path resolution so the expectation is
+	// portable across OS path separators (and Windows' drive-less IsAbs).
+	db := req.StateDBPath
+	if !filepath.IsAbs(db) {
+		db = filepath.Join(appDir(), db)
+	}
+	want := filepath.Join(filepath.Dir(db), "rwkv7-g1i.dev-0-1.w8a16.tune")
 	if got != want {
 		t.Fatalf("deviceTuneCache = %q, want %q", got, want)
 	}

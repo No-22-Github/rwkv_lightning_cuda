@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -112,13 +111,11 @@ func TestValidateStartup(t *testing.T) {
 }
 
 func TestCapabilitiesAndNodePayload(t *testing.T) {
-	dir := appDir()
-	for _, name := range []string{"rwkv_lighting_cuda", "rwkv_state_tune", "rwkv_miss_tune", "rwkv_quantize"} {
-		p := filepath.Join(dir, name)
-		if err := os.WriteFile(p, []byte("#!/bin/sh\n"), 0o755); err != nil {
+	for _, path := range []string{backendExecutable(), toolBinary("rwkv_state_tune"), toolBinary("rwkv_miss_tune"), toolBinary("rwkv_quantize")} {
+		if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		defer os.Remove(p)
+		defer os.Remove(path)
 	}
 	l := newLauncher()
 	if l.role() != "full" {
@@ -149,7 +146,7 @@ func TestCapabilitiesAndNodePayload(t *testing.T) {
 func TestJobsAliasesShareHandlers(t *testing.T) {
 	// The /api/v1 paths answer 404 in client-only form; to compare alias
 	// and new path directly the launcher must run in agent form.
-	bin := filepath.Join(appDir(), "rwkv_lighting_cuda")
+	bin := backendExecutable()
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}

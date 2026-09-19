@@ -119,8 +119,11 @@ func applyVisibleDevices(env []string, spec, vendor string) []string {
 		}
 		out = append(out, kv)
 	}
-	for k, v := range set {
-		out = append(out, k+"="+v)
+	// Append in deviceEnvVars order, not map order: deterministic output.
+	for _, name := range deviceEnvVars {
+		if v, ok := set[name]; ok {
+			out = append(out, name+"="+v)
+		}
 	}
 	return out
 }

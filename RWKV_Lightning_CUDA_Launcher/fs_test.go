@@ -14,7 +14,7 @@ import (
 // binary so the agent endpoints are live for fs tests.
 func fsAgentLauncher(t *testing.T) *launcher {
 	t.Helper()
-	bin := filepath.Join(appDir(), "rwkv_lighting_cuda")
+	bin := backendExecutable()
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
