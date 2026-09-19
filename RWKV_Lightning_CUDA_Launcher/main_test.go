@@ -42,8 +42,9 @@ func testFile(t *testing.T, name, contents string) string {
 	return p
 }
 func TestRuntimeArgs(t *testing.T) {
+	l := newLauncher()
 	req := startRequest{ModelPath: testFile(t, "with spaces.pth", "model"), VocabPath: testFile(t, "vocab.txt", "vocab"), Port: "8000", Password: "secret value", UseWKV32: true, ChunkLoad: true, ChunkSize: 64, StateDBPath: "cache path.db", TuneCache: "cache.tune"}
-	args, e := runtimeArgs(req)
+	args, e := l.runtimeArgs(req)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -51,19 +52,25 @@ func TestRuntimeArgs(t *testing.T) {
 	if !reflect.DeepEqual(args, want) {
 		t.Fatalf("%v", args)
 	}
-	for _, port := range []string{"0", "65536", "8088", "08088", "oops", "-1"} {
+	// Port 8088 is a legal runtime port now that the launcher listens on
+	// 10721; the launcher's own HTTP port stays reserved.
+	req.Port = "8088"
+	if _, e = l.runtimeArgs(req); e != nil {
+		t.Fatal("rejected runtime port 8088", e)
+	}
+	for _, port := range []string{"0", "65536", "10721", "oops", "-1"} {
 		req.Port = port
-		if _, e = runtimeArgs(req); e == nil {
+		if _, e = l.runtimeArgs(req); e == nil {
 			t.Fatalf("accepted port %s", port)
 		}
 	}
 	req.Port = "8000"
 	req.EnableDynamicLoading = true
-	if _, e = runtimeArgs(req); e == nil {
+	if _, e = l.runtimeArgs(req); e == nil {
 		t.Fatal("dynamic loading accepted a file")
 	}
 	req.ModelPath = t.TempDir()
-	if _, e = runtimeArgs(req); e != nil {
+	if _, e = l.runtimeArgs(req); e != nil {
 		t.Fatal(e)
 	}
 }
@@ -298,7 +305,7 @@ func TestProcessLogsAndProgress(t *testing.T) {
 	t.Setenv("RWKV_TEST_CHILD", "logs")
 	p := newProcess()
 	exe, _ := os.Executable()
-	if e := p.launch(exe, nil, "secret-value"); e != nil {
+	if e := p.launch(exe, nil, "secret-value", ""); e != nil {
 		t.Fatal(e)
 	}
 	p.mu.Lock()
@@ -327,7 +334,7 @@ func TestProcessStopAndMutualExclusion(t *testing.T) {
 	t.Setenv("RWKV_TEST_CHILD", "wait")
 	l := newLauncher()
 	exe, _ := os.Executable()
-	if e := l.tuning.launch(exe, nil, ""); e != nil {
+	if e := l.tuning.launch(exe, nil, "", ""); e != nil {
 		t.Fatal(e)
 	}
 	defer l.tuning.stop()
@@ -353,7 +360,7 @@ func TestReadinessIsReal(t *testing.T) {
 		t.Fatal(err)
 	}
 	exe, _ := os.Executable()
-	if e := l.runtime.launch(exe, nil, ""); e != nil {
+	if e := l.runtime.launch(exe, nil, "", ""); e != nil {
 		t.Fatal(e)
 	}
 	defer l.runtime.stop()

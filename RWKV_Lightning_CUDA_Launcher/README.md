@@ -9,7 +9,7 @@
 ```bash
 bun install
 bun run build
-CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o rwkv_launcher main.go
+CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o rwkv_launcher .
 ```
 
 Windows PowerShell：
@@ -18,8 +18,10 @@ Windows PowerShell：
 bun install
 bun run build
 $env:CGO_ENABLED="0"
-go build -trimpath -ldflags="-s -w" -o rwkv_launcher.exe main.go
+go build -trimpath -ldflags="-s -w" -o rwkv_launcher.exe .
 ```
+
+Linux 上要启用 GPU 指标（NVML 绑定）需以 `CGO_ENABLED=1 go build .` 构建（只需 gcc 与 libdl，不需要 CUDA toolkit）；`CGO_ENABLED=0` 构建仍然可用，metrics 端点会返回 `available:false` 加原因。macOS/Windows 构建不受影响。
 
 将 Launcher 放进原生后端的运行目录，保留原生 bundle 的依赖库：
 
@@ -35,7 +37,27 @@ runtime-directory/
 
 Windows release 中位于可执行文件旁的 DLL 也应保留；旧 Launcher 对 `lib/` 的 PATH 补充逻辑继续生效。Linux 使用原生 bundle 自带的库解析规则。CUDA/HIP 在原生程序编译时选择，前端没有虚构 CPU 或设备切换参数。
 
-运行 `./rwkv_launcher`（Windows 为 `./rwkv_launcher.exe`），访问 **http://127.0.0.1:8088**。程序默认打开系统浏览器；设置 `RWKV_LAUNCHER_NO_BROWSER=1` 可禁用自动打开。
+运行 `./rwkv_launcher`（Windows 为 `./rwkv_launcher.exe`），访问 **http://127.0.0.1:10721**。程序默认打开系统浏览器；设置 `RWKV_LAUNCHER_NO_BROWSER=1` 可禁用自动打开。
+
+### 形态与启动参数（多后端）
+
+同一个二进制靠 flag 决定跑成什么角色，详见 [docs/control-plane-api.md](docs/control-plane-api.md)：
+
+```bash
+rwkv_launcher                                  # 本机全套：Client + Agent 同机（现有行为）
+rwkv_launcher --listen 0.0.0.0:18766 --token t # 服务器节点：仅 Agent；非 loopback 必须带 token，否则拒绝启动
+rwkv_launcher --client                         # 控制台：仅 Client（本机无 runtime 二进制时自动进入，合法状态）
+```
+
+| Flag | 默认 | 说明 |
+| --- | --- | --- |
+| `--listen` | `127.0.0.1:10721` | 监听地址；非 loopback 必须配 `--token` |
+| `--token` | 空 | 控制/推理全部路径的 Bearer token（含 `/v1` 反代） |
+| `--client` | false | 纯 Client：WebUI + 后端注册表，不管理本地进程 |
+| `--config` | `~/.rwkv_launcher/launcher.json` | 后端注册表落盘位置（JSON，0600） |
+| `--card` | 空 | 本 Agent 默认选卡，注入 `CUDA_VISIBLE_DEVICES`（AMD 为 `HIP/ROCR_VISIBLE_DEVICES`） |
+
+`visible_devices`（字符串，如 `0`、`0,1`、空串=显式不注入）可出现在 Runtime / Tuning / Quantization 三个请求体里，优先级：请求体 > `--card` > 继承的 `CUDA_VISIBLE_DEVICES` > 不注入。训练与推理的互斥相应从全局改为按卡：显式选卡且设备集无交集时可并行，不可判定时保守拦截。
 
 `dist/` 是纯静态输出，使用 `//go:embed dist/*` 编入 Go 二进制。生产环境不需要 Bun 或 Node.js。仓库中保留生成的 `dist/`，CI 会使用锁文件重新安装依赖、测试并构建前端，再编译 Go 并将 `dist/` 放入发布目录；修改前端后必须重新执行 `bun run build`，将源码、锁文件和更新后的 `dist/` 一起提交。
 
@@ -49,7 +71,7 @@ Windows release 中位于可执行文件旁的 DLL 也应保留；旧 Launcher �
 bun run dev
 ```
 
-Vite 将 `/api`、`/v1` 和 `/logs` 转发到 `127.0.0.1:8088`。生产流量直接走 Go，没有 Node 中间层。`go run main.go` 的临时可执行目录不包含原生二进制，不适合验证本地进程启动。
+Vite 将 `/api`、`/v1` 和 `/logs` 转发到 `127.0.0.1:10721`。生产流量直接走 Go，没有 Node 中间层。`go run .` 的临时可执行目录不包含原生二进制，不适合验证本地进程启动。
 
 ## 使用
 
@@ -151,7 +173,11 @@ State tuning 使用 `.pth` 基础模型，最终张量结构由原生加载器�
 
 ## Launcher HTTP 接口
 
-新增的控制接口在 `main.go` 实现，不是对原生 API 的假设。所有 POST 都发送 JSON，失败返回实际 `{"error":"..."}` 与 HTTP 错误码。
+控制面接口的完整路径表、schema 与安全模型见 [docs/control-plane-api.md](docs/control-plane-api.md)。所有 POST 都发送 JSON，失败返回实际 `{"error":"..."}` 与 HTTP 错误码。
+
+新控制面（`/api/v1`）：`/api/v1/node`、`/api/v1/node/metrics`、`/api/v1/node/fs`、`/api/v1/node/dialog/{file,directory,reveal}`、`/api/v1/runtime`（+ `start/stop/restart/logs`）、`/api/v1/jobs`（+ `/{id}`、`/tuning`、`/tuning/validate`、`/quantization`、`/{id}/stop`、`/{id}/logs`）、`/api/v1/backends`（Client：增删查 + `/{id}/probe` + `/{id}/api/v1/*`、`/{id}/v1/*` 转发）。
+
+老路径全部保留为 alias，内部转调同一个 handler：
 
 | Method | Path                       | 行为                                                            |
 | ------ | -------------------------- | --------------------------------------------------------------- |
@@ -159,7 +185,7 @@ State tuning 使用 `.pth` 基础模型，最终张量结构由原生加载器�
 | POST   | `/api/start`               | RuntimeConfig；验证路径/端口并启动                              |
 | POST   | `/api/stop`                | 等待运行进程退出                                                |
 | POST   | `/api/restart`             | 使用上次实际启动配置停止并重启                                  |
-| POST   | `/api/pick-file`           | 原生宿主机文件选择；无图形环境时明确报错，可手动输入路径        |
+| POST   | `/api/pick-file`           | 原生宿主机文件选择；仅 Agent 角色 + loopback 来源，否则明确报错 |
 | POST   | `/api/pick-directory`      | 原生宿主机目录选择，用于训练输出目录                            |
 | GET    | `/logs`                    | 保留旧 Runtime SSE 日志入口                                     |
 | GET    | `/api/tuning/status`       | 训练状态、可执行文件是否存在、日志、进度、loss 数据、checkpoint |
@@ -172,7 +198,7 @@ State tuning 使用 `.pth` 基础模型，最终张量结构由原生加载器�
 | POST   | `/api/quantization/stop`   | 停止量化进程                                                    |
 | \*     | `/v1/*`                    | 转发到本 Launcher 管理的原生 backend，SSE 即时 flush            |
 
-完整 TypeScript payload 见 `src/lib/api/launcher.ts`。推理接口沿用项目文档，没有新增原生 CLI flag。静态和控制服务仅绑定 loopback，并验证 Host / Origin；不允许从外站操作本地进程。Markdown 不直接解析原始 HTML；助手输出完整 HTML 或闭合的 `html` fence 时会出现新标签页预览按钮，生成内容运行在不带同源权限的 sandbox iframe 中。
+完整 TypeScript payload 见 `src/lib/api/launcher.ts`。推理接口沿用项目文档，没有新增原生 CLI flag（选卡走环境变量注入）。loopback 形态验证 Host / Origin；非 loopback 的 Agent 以 `--token` 鉴权并保留 same-origin 浏览器检查。Markdown 不直接解析原始 HTML；助手输出完整 HTML 或闭合的 `html` fence 时会出现新标签页预览按钮，生成内容运行在不带同源权限的 sandbox iframe 中。
 
 ## 验证
 

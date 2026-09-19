@@ -104,9 +104,19 @@ def main():
             for pattern in ("cudart*.dll", "cublas*.dll"):
                 for dll in sorted(sub.glob(pattern)):
                     shutil.copy2(dll, bundle / dll.name)
-    run("go", "build", "-trimpath", "-ldflags=-s -w", "-o",
-        bundle / ("rwkv_launcher" + SUFFIX), "main.go",
-        cwd=ROOT / "RWKV_Lightning_CUDA_Launcher")
+    # The launcher is a multi-file package now: build by package path. The
+    # NVML metrics path (linux, cgo dlopen of libnvidia-ml) needs CGO on
+    # Linux; Windows keeps CGO off (no NVML path there yet). The version
+    # stamp feeds /api/v1/node's version field.
+    launcher_env = dict(os.environ)
+    launcher_env["CGO_ENABLED"] = "0" if WINDOWS else "1"
+    launcher_ldflags = "-s -w"
+    release_version = os.environ.get("RWKV_RELEASE_VERSION")
+    if release_version:
+        launcher_ldflags += " -X main.launcherVersion=" + release_version
+    run("go", "build", "-trimpath", f"-ldflags={launcher_ldflags}", "-o",
+        bundle / ("rwkv_launcher" + SUFFIX), ".",
+        cwd=ROOT / "RWKV_Lightning_CUDA_Launcher", env=launcher_env)
     shutil.copytree(ROOT / "RWKV_Lightning_CUDA_Launcher/dist", bundle / "dist")
     shutil.copy2(ROOT / "assets/rwkv_vocab_v20230424.txt", bundle)
     # Check relocated CLIs with a clean library path, without loading a model.

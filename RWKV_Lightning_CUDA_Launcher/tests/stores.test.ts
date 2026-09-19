@@ -10,7 +10,7 @@ Object.defineProperty(globalThis, "localStorage", {
 });
 Object.defineProperty(globalThis, "location", {
   configurable: true,
-  value: { origin: "http://127.0.0.1:8088" },
+  value: { origin: "http://127.0.0.1:10721" },
 });
 const { useChat } = await import("../src/stores/chat");
 const { useTranslate } = await import("../src/stores/translate");
