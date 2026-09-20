@@ -128,7 +128,7 @@ func TestProbeLadder(t *testing.T) {
 		w.WriteHeader(404)
 	}))
 	p = probeBackend(oldAgent, "")
-	if !p.Reachable || p.Kind != "agent" || fmt.Sprint(p.Capabilities) != fmt.Sprint([]string{"runtime", "tuning_state", "tuning_miss", "quantization", "fs"}) {
+	if !p.Reachable || p.Kind != "agent" || fmt.Sprint(p.Capabilities) != fmt.Sprint([]string{"runtime"}) {
 		t.Fatalf("old agent probe: %+v", p)
 	}
 

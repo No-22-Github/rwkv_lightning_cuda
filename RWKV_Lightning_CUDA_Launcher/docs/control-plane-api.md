@@ -37,7 +37,7 @@
 
 - 配置了 `--token` 后，`/api/*`、`/logs`、`/v1/*` 全部要求 `Authorization: Bearer <token>`（含本机 `/v1` 反代——否则 token 化的 Agent 会因 password 自动注入变成开放推理代理）。
 - token 不接受 query string 传参；401 响应体只回 `{"error":"unauthorized"}`，不含任何路径或配置信息；比较用常量时间。
-- agent token 与 runtime password 是两个信任域，禁止合并。
+- agent token 与 runtime password 是两个信任域，禁止合并。Agent 校验 token 后，向 runtime 转发时删除该 Authorization，再按 `config.Password` 设置凭证；runtime 未设密码时不发送 Authorization。未配置 Agent token 的本机旧模式仍保留调用方提供的 runtime Authorization，缺省时才注入配置密码。
 
 ## 2. 路径表
 
@@ -91,7 +91,8 @@
 
 - `base_url` 不带 `/v1`/`/api` 后缀；带后缀的请求被拒绝。
 - `id` 由 Client 生成（6 位十六进制随机串），不用 base_url 做 id。`local` 固定保留给本机全套形态的本地 runtime，不可删除。
-- 注册表落盘 `{"backends":[{id,name,base_url,token}]}`，文件 0600；**任何响应都不回显 token**。
+- 注册表落盘 `{"backends":[{id,name,base_url,token}]}`，文件 0600；**任何响应都不回显 token**。先写入独立临时文件并同步、替换成功后才更新内存；失败返回错误，添加/删除不会假报成功，原节点和探测状态保留。
+- 返回项增加 `legacy: true/false`，表示是否使用旧版 Agent 控制协议；它来自能力探测，不改变持久化文件格式。
 
 ### 转发层（Client）
 
@@ -100,16 +101,28 @@
 /api/v1/backends/{id}/v1/...       → <base_url>/v1/...
 ```
 
-剥前缀、换 token，其余 header、method、status、body 原样透传（**不 re-marshal**——Agent 侧 `decode()` 开了 `DisallowUnknownFields`，任何字段增删都会让跨版本请求 400）。SSE 路径设 `FlushInterval = -1`。转发传输层无整体/响应头超时（`/v1/model/load` 要等活跃推理排空，几十秒是正常的）。
+剥前缀、换 token。Client 入口先执行 Host/Origin/Sec-Fetch-Site 校验，向后端转发时移除 `Origin` 和 `Sec-Fetch-Site`：这已是服务器间请求，目标 Host 与浏览器访问的 Client 不同。其余端到端 header、method、status、body 原样透传（**不 re-marshal**——Agent 侧 `decode()` 开了 `DisallowUnknownFields`，任何字段增删都会让跨版本请求 400）。SSE 路径设 `FlushInterval = -1`。转发传输层无整体/响应头超时（`/v1/model/load` 要等活跃推理排空，几十秒是正常的）。
 
 ### 能力探测（Client，添加后端时与 probe 时各跑一次）
 
 1. `GET <base_url>/api/v1/node` → 200 且 `role=="agent"` → 全功能 Agent，读 `capabilities`。
-2. 否则 `GET <base_url>/api/status` → 200 且非 `role=="client"` → 老版本 Agent，按缺省能力集 `[runtime, tuning_state, tuning_miss, quantization, fs]` 处理。若响应带 `role:"client"` 则明确报错（Client 不是 backend）。
+2. 否则 `GET <base_url>/api/status` → 200 且非 `role=="client"` → 老版本 Agent，标记 `legacy:true`，基础能力为 `runtime`；继续查询旧训练/量化 status，根据 `available` / `miss_available` 增加工具能力。不宣告 `fs`、`metrics` 或 `host_dialog`。若响应带 `role:"client"` 则明确报错（Client 不是 backend）。
 3. 否则 `GET <base_url>/v1/server/status` → 200 → 裸推理节点，能力集 `["inference"]`。
 4. 都不通 → 报错，区分连接失败与 401。
 
 `capabilities` 是开放集合：出现未知能力位必须忽略而不是报错。
+
+### 老 Agent 的转发适配
+
+首次控制请求若还没有探测结果，会先探测协议；不对推理请求增加探测或重试。升级 Agent 后可调用 probe 刷新协议标记。
+
+- 新 runtime 路径映射到 `/api/status`、`/api/start`、`/api/stop`、`/api/restart`，runtime 日志映射到旧 `/logs`。
+- 新 jobs 的单任务状态、启动、停止及训练校验，映射到旧 `/api/tuning/*`、`/api/quantization/*`。请求体逐字节透传，不删除新字段；旧版不认识的字段仍由旧版返回校验错误。
+- `GET /api/v1/node` 基于旧 `/api/status` 补充 `role:"agent"`、`version:"legacy"` 和探测能力；`GET /api/v1/jobs` 汇总两个旧 status。这两处只适配读取响应，不修改 POST body。
+- 也允许在 backend 前缀下直接访问上述白名单内的旧路径及 `/logs`；不开放任意 `/api/*`。
+- 老版本没有文件浏览、GPU 指标和独立任务 SSE。对应新接口返回 `501 {"error":"unsupported",...}`；任务日志可从单任务 status 的 `logs` 字段读取，不把 runtime 的 `/logs` 冒充任务日志。
+- 不转发老版本宿主机对话框，因为老 Agent 没有远程调用限制。新对话框路径在老后端返回 501，旧对话框路径不在转发白名单中。
+
 
 ## 3. 关键 schema
 

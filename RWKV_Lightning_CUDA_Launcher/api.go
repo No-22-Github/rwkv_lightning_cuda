@@ -550,7 +550,7 @@ func (l *launcher) backendView(e backendEntry) backendView {
 	}
 	return backendView{
 		ID: e.ID, Name: e.Name, BaseURL: e.BaseURL, HasToken: e.Token != "",
-		Kind: p.Kind, Capabilities: caps, Reachable: p.Reachable,
+		Legacy: p.Legacy, Kind: p.Kind, Capabilities: caps, Reachable: p.Reachable,
 		LastProbe: p.LastProbe, ProbeError: p.ProbeError,
 	}
 }
@@ -558,12 +558,12 @@ func (l *launcher) backendView(e backendEntry) backendView {
 func (l *launcher) handleForward(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	rest := r.PathValue("rest")
-	if !(strings.HasPrefix(rest, "api/v1/") || strings.HasPrefix(rest, "v1/")) {
+	if !(strings.HasPrefix(rest, "api/v1/") || strings.HasPrefix(rest, "v1/") || isLegacyForwardPath(r.Method, rest)) {
 		writeJSON(w, 404, map[string]any{"error": "unsupported forward path"})
 		return
 	}
 	if e, ok := l.backends.lookup(id); ok {
-		forwardToBackend(w, r, e, rest)
+		l.forwardRegisteredBackend(w, r, e, rest)
 		return
 	}
 	if e, isLocal := l.localBackend(); isLocal && id == "local" {

@@ -3,7 +3,8 @@ package main
 // §5.3–§5.4 Client-side backend registry and forwarding. The registry is
 // the only persistent Client state (0600 JSON file). Forwarding strips the
 // /api/v1/backends/{id} prefix, swaps the Authorization header for the
-// backend's token, and passes method, headers, status, and body through
+// backend's token, removes browser provenance after entrance validation,
+// and passes remaining end-to-end headers, status, method and body through
 // byte-for-byte — never re-marshalling JSON (the Agent's decode() uses
 // DisallowUnknownFields, so any re-marshal is a cross-version 400 bomb).
 
@@ -33,6 +34,7 @@ type backendEntry struct {
 }
 
 type probeResult struct {
+	Legacy       bool     `json:"legacy"`
 	Kind         string   `json:"kind"`
 	Capabilities []string `json:"capabilities"`
 	Reachable    bool     `json:"reachable"`
@@ -41,6 +43,7 @@ type probeResult struct {
 }
 
 type backendView struct {
+	Legacy       bool     `json:"legacy"`
 	ID           string   `json:"id"`
 	Name         string   `json:"name"`
 	BaseURL      string   `json:"base_url"`
@@ -87,18 +90,35 @@ func (rg *registry) ensureLoaded() {
 	}
 }
 
-func (rg *registry) save() {
-	os.MkdirAll(filepath.Dir(rg.path), 0o700)
-	data, err := json.MarshalIndent(map[string]any{"backends": rg.entries}, "", "  ")
+// save commits a candidate snapshot before the caller changes in-memory state.
+func (rg *registry) save(entries []backendEntry) error {
+	if err := os.MkdirAll(filepath.Dir(rg.path), 0o700); err != nil {
+		return fmt.Errorf("save backend registry: %w", err)
+	}
+	data, err := json.MarshalIndent(map[string]any{"backends": entries}, "", "  ")
 	if err != nil {
-		return
+		return fmt.Errorf("save backend registry: %w", err)
 	}
-	tmp := rg.path + ".tmp"
-	if os.WriteFile(tmp, data, 0o600) != nil {
-		return
+	f, err := os.CreateTemp(filepath.Dir(rg.path), ".launcher-*.tmp")
+	if err != nil {
+		return fmt.Errorf("save backend registry: %w", err)
 	}
-	_ = os.Chmod(tmp, 0o600)
-	_ = os.Rename(tmp, rg.path)
+	defer os.Remove(f.Name())
+	// CreateTemp creates a new 0600 file; never follow an existing .tmp symlink.
+	if _, err = f.Write(data); err == nil {
+		err = f.Sync()
+	}
+	closeErr := f.Close()
+	if err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		err = os.Rename(f.Name(), rg.path)
+	}
+	if err != nil {
+		return fmt.Errorf("save backend registry: %w", err)
+	}
+	return nil
 }
 
 // validateBaseURL enforces §5.3: scheme + host, no /v1 suffix. base_url must
@@ -141,8 +161,11 @@ func (rg *registry) add(name, baseURL, token string) (backendEntry, error) {
 			return backendEntry{}, fmt.Errorf("backend id collision; retry the request")
 		}
 	}
-	rg.entries = append(rg.entries, e)
-	rg.save()
+	entries := append(append([]backendEntry{}, rg.entries...), e)
+	if err := rg.save(entries); err != nil {
+		return backendEntry{}, err
+	}
+	rg.entries = entries
 	return e, nil
 }
 
@@ -152,9 +175,13 @@ func (rg *registry) remove(id string) error {
 	rg.ensureLoaded()
 	for i, e := range rg.entries {
 		if e.ID == id {
-			rg.entries = append(rg.entries[:i], rg.entries[i+1:]...)
+			entries := append([]backendEntry{}, rg.entries[:i]...)
+			entries = append(entries, rg.entries[i+1:]...)
+			if err := rg.save(entries); err != nil {
+				return err
+			}
+			rg.entries = entries
 			delete(rg.probes, id)
-			rg.save()
 			return nil
 		}
 	}
@@ -178,7 +205,7 @@ func (rg *registry) lookup(id string) (backendEntry, bool) {
 
 var (
 	errUnknownBackend = fmt.Errorf("unknown backend id")
-	errLocalBackend  = fmt.Errorf("the local backend cannot be removed")
+	errLocalBackend   = fmt.Errorf("the local backend cannot be removed")
 )
 
 func (rg *registry) setProbe(id string, p probeResult) {
@@ -229,7 +256,7 @@ func (rg *registry) list(local localProvider) []backendView {
 		}
 		return backendView{
 			ID: e.ID, Name: e.Name, BaseURL: e.BaseURL, HasToken: e.Token != "",
-			Kind: p.Kind, Capabilities: caps, Reachable: p.Reachable,
+			Legacy: p.Legacy, Kind: p.Kind, Capabilities: caps, Reachable: p.Reachable,
 			LastProbe: p.LastProbe, ProbeError: p.ProbeError,
 		}
 	}
@@ -298,8 +325,21 @@ func probeBackend(baseURL, token string) probeResult {
 		}
 		result.Reachable = true
 		result.Kind = "agent"
-		// Old agents predate the capability set: assume the legacy set.
-		result.Capabilities = []string{"runtime", "tuning_state", "tuning_miss", "quantization", "fs"}
+		// Only advertise tools confirmed by the old status endpoints.
+		result.Legacy = true
+		result.Capabilities = []string{"runtime"}
+		var tuning, quantization map[string]any
+		if code, err := fetch("/api/tuning/status", &tuning); err == nil && code == 200 {
+			if tuning["available"] == true {
+				result.Capabilities = append(result.Capabilities, "tuning_state")
+			}
+			if tuning["miss_available"] == true {
+				result.Capabilities = append(result.Capabilities, "tuning_miss")
+			}
+		}
+		if code, err := fetch("/api/quantization/status", &quantization); err == nil && code == 200 && quantization["available"] == true {
+			result.Capabilities = append(result.Capabilities, "quantization")
+		}
 		return result
 	}
 	if status2 == http.StatusUnauthorized {
@@ -388,7 +428,12 @@ func forwardToBackend(w http.ResponseWriter, r *http.Request, be backendEntry, r
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.Out.URL.Path = "/" + rest
+			pr.Out.URL.RawPath = ""
 			pr.SetURL(base)
+			// Browser provenance was checked at the Client entrance. This is
+			// now a server-to-server request with a different Host.
+			pr.Out.Header.Del("Origin")
+			pr.Out.Header.Del("Sec-Fetch-Site")
 			pr.Out.Header.Del("Authorization")
 			if be.Token != "" {
 				pr.Out.Header.Set("Authorization", "Bearer "+be.Token)

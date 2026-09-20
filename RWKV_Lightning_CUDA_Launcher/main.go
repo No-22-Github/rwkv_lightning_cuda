@@ -345,11 +345,11 @@ type launcher struct {
 
 func newLauncher() *launcher {
 	l := &launcher{
-		runtime:     newProcess(),
-		tuning:      newProcess(),
+		runtime:      newProcess(),
+		tuning:       newProcess(),
 		quantization: newProcess(),
-		config:      startRequest{Port: defaultPort, VocabPath: defaultVocabPath, ChunkSize: 128, StateDBPath: "rwkv_sessions.db"},
-		listen:      defaultListen,
+		config:       startRequest{Port: defaultPort, VocabPath: defaultVocabPath, ChunkSize: 128, StateDBPath: "rwkv_sessions.db"},
+		listen:       defaultListen,
 	}
 	l.backends = openRegistry(defaultConfigPath())
 	l.fs = openFSWhitelist(filepath.Join(appDir(), fsRootsFile))
@@ -816,6 +816,11 @@ func (l *launcher) proxy(w http.ResponseWriter, r *http.Request) {
 	original := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		original(req)
+		// The authenticated Agent credential belongs to this hop only.
+		// Without an Agent token retain legacy caller-supplied runtime auth.
+		if l.token != "" {
+			req.Header.Del("Authorization")
+		}
 		if req.Header.Get("Authorization") == "" && config.Password != "" {
 			req.Header.Set("Authorization", "Bearer "+config.Password)
 		}
@@ -854,11 +859,11 @@ func defaultConfigPath() string {
 // can spawn arbitrary processes — loopback makes that a feature, otherwise
 // it is unauthenticated RCE), and a client-only form must stay loopback.
 func validateStartup(listen, token string, clientOnly, agentCapable bool) error {
-	host, _, err := net.SplitHostPort(listen)
+	host, portText, err := net.SplitHostPort(listen)
 	if err != nil {
 		return fmt.Errorf("--listen must be host:port, got %q", listen)
 	}
-	if port, err := strconv.Atoi(strings.SplitN(listen, ":", 2)[1]); err != nil || port < 1 || port > 65535 {
+	if port, err := strconv.Atoi(portText); err != nil || port < 1 || port > 65535 {
 		return fmt.Errorf("--listen port must be 1–65535")
 	}
 	loopback := false
@@ -946,7 +951,7 @@ func backendProcessEnv(baseDir string) []string {
 		}
 	}
 	if !replaced {
-		env = append(env, prefix + newPath)
+		env = append(env, prefix+newPath)
 	}
 	return env
 }
