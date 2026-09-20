@@ -13,6 +13,15 @@ import { cn } from "@/lib/utils";
 
 type TFn = (key: MessageKey, vars?: Record<string, string | number>) => string;
 
+/**
+ * The rail rows only have ~170px; NVML reports "NVIDIA RTX … Workstation
+ * Edition" in full. Drop the vendor prefix — every card on a box shares it —
+ * and let truncate handle the rest.
+ */
+export function compactGpuName(name: string) {
+  return name.replace(/^NVIDIA\s+/i, "");
+}
+
 /** `status` alone is not enough: an inference-only node is "n/a", not offline. */
 export function runtimeTone(runtime?: RuntimeState): StatusTone {
   switch (runtime?.status) {
@@ -110,7 +119,7 @@ export function GpuCard({ gpu }: { gpu: GpuMetric }) {
     <div className="rounded-lg border border-border bg-background p-3">
       <div className="flex items-center justify-between gap-2">
         <span className="min-w-0 truncate text-[12.5px] font-medium">
-          #{gpu.index} · {gpu.name}
+          #{gpu.index} · {compactGpuName(gpu.name)}
         </span>
         <span className="shrink-0 font-mono text-[11.5px] text-muted-foreground">
           {gpu.temperature_c !== undefined ? `${gpu.temperature_c}°C` : "—"}
@@ -148,15 +157,19 @@ export function GpuCard({ gpu }: { gpu: GpuMetric }) {
  */
 export function GpuMiniRows({ metrics }: { metrics: MetricsResponse }) {
   return (
-    <div className="grid gap-2.5">
+    // minmax(0,1fr): an implicit auto column sizes to the nowrap name's
+    // max-content and pushes the utilization/temp columns out of the card.
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-2.5">
       {metrics.gpus.map((gpu) => {
         const used = percent(gpu.memory_used_bytes, gpu.memory_total_bytes);
         const utilization = gpu.utilization_percent ?? 0;
         return (
           <div key={gpu.index}>
             <div className="flex justify-between gap-1.5 text-[10.5px] text-muted-foreground">
-              <span className="truncate">
-                #{gpu.index} {gpu.name}
+              {/* min-w-0 lets truncate win over flex's min-content size;
+                  without it a long name pushes the utilization out of the card. */}
+              <span className="min-w-0 truncate">
+                #{gpu.index} {compactGpuName(gpu.name)}
               </span>
               <span className="shrink-0 font-mono">{utilization}%</span>
             </div>
@@ -225,7 +238,7 @@ export function GpuList({
 }) {
   if (metrics?.available && metrics.gpus.length > 0) {
     return (
-      <div className="grid gap-2.5">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-2.5">
         {metrics.gpus.map((gpu) => (
           <GpuCard key={gpu.index} gpu={gpu} />
         ))}

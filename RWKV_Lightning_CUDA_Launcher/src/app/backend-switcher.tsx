@@ -93,7 +93,7 @@ export function BackendSwitcher() {
           {metrics?.available && metrics.gpus.length > 0 ? (
             // Multi-GPU boxes exist; cap the card so four rows cannot push
             // the footer off-screen.
-            <div className="max-h-[172px] overflow-y-auto px-3 py-2.5">
+            <div className="max-h-[172px] overflow-x-hidden overflow-y-auto px-3 py-2.5">
               <GpuMiniRows metrics={metrics} />
             </div>
           ) : (
