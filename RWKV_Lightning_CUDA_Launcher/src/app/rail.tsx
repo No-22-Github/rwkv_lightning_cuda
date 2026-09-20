@@ -1,41 +1,47 @@
 import { useState, type ReactNode } from "react";
 import {
-  Boxes,
-  Database,
+  Archive,
+  ChartLine,
+  Cpu,
   Languages,
   MessageSquare,
   PanelLeft,
   Play,
   RotateCcw,
-  Settings,
+  Server,
+  Settings2,
   Square,
-  TrendingUp,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { BackendSwitcher } from "@/app/backend-switcher";
 import { useCurrent } from "@/app/use-current";
 import { RuntimeBadge } from "@/components/runtime-controls";
+import {
+  gpuUnavailableReason,
+  GpuMiniRows,
+} from "@/components/node-status";
 import { StatusDot } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { applyDevice } from "@/lib/api/launcher";
-import { formatGigabytes } from "@/lib/format";
 import { useI18n, type MessageKey } from "@/lib/i18n";
 import { navigate, useRoute, type Route } from "@/lib/router";
 import { cn } from "@/lib/utils";
 import { useRuntimeForm } from "@/stores/forms";
+import { useBackends } from "@/stores/backends";
 import { useNodes } from "@/stores/nodes";
 import { toast, useRail } from "@/stores/ui";
 
 interface NavItem {
   route: Route;
   label: MessageKey;
-  icon: typeof Boxes;
+  icon: LucideIcon;
 }
 
 const SECTIONS: { title: MessageKey; items: NavItem[] }[] = [
   {
     title: "nav.overview",
-    items: [{ route: "nodes", label: "nav.nodes", icon: Boxes }],
+    items: [{ route: "nodes", label: "nav.nodes", icon: Server }],
   },
   {
     title: "nav.inference",
@@ -47,9 +53,9 @@ const SECTIONS: { title: MessageKey; items: NavItem[] }[] = [
   {
     title: "nav.operations",
     items: [
-      { route: "runtime", label: "nav.runtime", icon: Play },
-      { route: "training", label: "nav.training", icon: TrendingUp },
-      { route: "quant", label: "nav.quantization", icon: Database },
+      { route: "runtime", label: "nav.runtime", icon: Cpu },
+      { route: "training", label: "nav.training", icon: ChartLine },
+      { route: "quant", label: "nav.quantization", icon: Archive },
     ],
   },
 ];
@@ -58,6 +64,7 @@ export function Rail() {
   const { t } = useI18n();
   const route = useRoute();
   const collapsed = useRail((s) => s.collapsed);
+  const backendCount = useBackends((s) => s.list.length);
   const { jobs } = useCurrent();
   const trainingRunning = Boolean(jobs?.tuning?.running);
 
@@ -84,6 +91,7 @@ export function Rail() {
               item={item}
               active={route === item.route}
               collapsed={collapsed}
+              count={item.route === "nodes" ? backendCount : undefined}
               dot={
                 item.route === "runtime" ? (
                   <RuntimeDot />
@@ -99,7 +107,7 @@ export function Rail() {
       <div className="min-h-3.5 flex-1" />
 
       <NavButton
-        item={{ route: "settings", label: "nav.settings", icon: Settings }}
+        item={{ route: "settings", label: "nav.settings", icon: Settings2 }}
         active={route === "settings"}
         collapsed={collapsed}
       />
@@ -115,11 +123,13 @@ function NavButton({
   item,
   active,
   collapsed,
+  count,
   dot,
 }: {
   item: NavItem;
   active: boolean;
   collapsed: boolean;
+  count?: number;
   dot?: ReactNode;
 }) {
   const { t } = useI18n();
@@ -136,6 +146,11 @@ function NavButton({
     >
       <Icon className="size-4 shrink-0 text-muted-foreground" />
       {!collapsed && <span className="min-w-0 flex-1 truncate">{t(item.label)}</span>}
+      {!collapsed && count ? (
+        <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+          {count}
+        </span>
+      ) : null}
       {dot}
     </button>
   );
@@ -156,7 +171,8 @@ function RuntimeDot() {
 /** Collapsed rail keeps the node identity and a GPU peek on hover. */
 function CollapsedFooter() {
   const { t } = useI18n();
-  const { backendId, backend, runtime, metrics, hasAgent, busy } = useCurrent();
+  const { backendId, backend, runtime, metrics, metricsError, hasAgent, busy } =
+    useCurrent();
   const form = useRuntimeForm((s) => s.config);
   const devices = useRuntimeForm((s) => s.devices);
   const start = useNodes((s) => s.startRuntime);
@@ -239,58 +255,13 @@ function CollapsedFooter() {
               {backend?.base_url ?? "—"}
             </p>
           </div>
-          {gpus.length > 0 ? (
-            <div className="grid gap-2.5 px-3 py-2.5">
-              {gpus.map((gpu) => {
-                const used =
-                  gpu.memory_total_bytes > 0
-                    ? Math.round(
-                        (gpu.memory_used_bytes / gpu.memory_total_bytes) * 100,
-                      )
-                    : 0;
-                return (
-                  <div key={gpu.index}>
-                    <div className="flex justify-between gap-1.5 text-[10.5px] text-muted-foreground">
-                      <span className="truncate">
-                        #{gpu.index} {gpu.name}
-                      </span>
-                      <span className="shrink-0 font-mono">
-                        {gpu.utilization_percent ?? 0}%
-                      </span>
-                    </div>
-                    <div className="mt-1.5 h-[5px] overflow-hidden rounded-full bg-muted">
-                      <div
-                        className={cn(
-                          "h-[5px] rounded-full",
-                          (gpu.utilization_percent ?? 0) > 85
-                            ? "bg-warning"
-                            : "bg-success",
-                        )}
-                        style={{ width: `${used}%` }}
-                      />
-                    </div>
-                    <div className="mt-1 flex justify-between font-mono text-[10px] text-muted-foreground">
-                      <span>
-                        {formatGigabytes(gpu.memory_used_bytes)} /{" "}
-                        {formatGigabytes(gpu.memory_total_bytes)}
-                      </span>
-                      <span>
-                        {gpu.temperature_c !== undefined
-                          ? `${gpu.temperature_c}°C`
-                          : "—"}{" "}
-                        ·{" "}
-                        {gpu.power_watts !== undefined
-                          ? `${gpu.power_watts}W`
-                          : "—"}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
+          {metrics?.available && gpus.length > 0 ? (
+            <div className="px-3 py-2.5">
+              <GpuMiniRows metrics={metrics} />
             </div>
           ) : (
             <p className="px-3 py-2.5 text-[10.5px] leading-relaxed text-muted-foreground">
-              {t("runtime.gpuNoMetrics")}
+              {gpuUnavailableReason(t, metrics, metricsError, backend)}
             </p>
           )}
           <div className="flex gap-1.5 border-t border-border p-2">

@@ -142,9 +142,74 @@ export function GpuCard({ gpu }: { gpu: GpuMetric }) {
 }
 
 /**
- * GPU metrics have four distinct unavailable reasons; never render an
- * all-zero GPU list.
+ * One compact per-GPU row: utilization headline, memory bar, memory/temp/
+ * power line. Shared by the rail's collapsed peek and the expanded switcher
+ * card (the mockup renders the identical block in both places).
  */
+export function GpuMiniRows({ metrics }: { metrics: MetricsResponse }) {
+  return (
+    <div className="grid gap-2.5">
+      {metrics.gpus.map((gpu) => {
+        const used = percent(gpu.memory_used_bytes, gpu.memory_total_bytes);
+        const utilization = gpu.utilization_percent ?? 0;
+        return (
+          <div key={gpu.index}>
+            <div className="flex justify-between gap-1.5 text-[10.5px] text-muted-foreground">
+              <span className="truncate">
+                #{gpu.index} {gpu.name}
+              </span>
+              <span className="shrink-0 font-mono">{utilization}%</span>
+            </div>
+            <div className="mt-1.5 h-[5px] overflow-hidden rounded-full bg-muted">
+              <div
+                className={cn(
+                  "h-[5px] rounded-full",
+                  utilization > 85 ? "bg-warning" : "bg-success",
+                )}
+                style={{ width: `${used}%` }}
+              />
+            </div>
+            <div className="mt-1 flex justify-between font-mono text-[10px] text-muted-foreground">
+              <span>
+                {formatGigabytes(gpu.memory_used_bytes)} /{" "}
+                {formatGigabytes(gpu.memory_total_bytes)}
+              </span>
+              <span>
+                {gpu.temperature_c !== undefined
+                  ? `${gpu.temperature_c}°C`
+                  : "—"}{" "}
+                ·{" "}
+                {gpu.power_watts !== undefined ? `${gpu.power_watts}W` : "—"}
+              </span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * GPU metrics have four distinct unavailable reasons; never render an
+ * all-zero GPU list. Shared by the runtime page notice and the rail footer.
+ */
+export function gpuUnavailableReason(
+  t: TFn,
+  metrics: MetricsResponse | undefined,
+  metricsError: string | undefined,
+  backend: BackendView | undefined,
+): string {
+  return metrics?.reason
+    ? metrics.reason
+    : !backend?.reachable
+      ? t("runtime.gpuReason.unreachable")
+      : backend.kind === "inference_only"
+        ? t("runtime.gpuReason.inference")
+        : backend.legacy
+          ? t("runtime.gpuReason.legacy")
+          : metricsError || t("runtime.gpuReason.unknown");
+}
+
 export function GpuList({
   metrics,
   metricsError,
@@ -168,15 +233,7 @@ export function GpuList({
     );
   }
 
-  const reason = metrics?.reason
-    ? metrics.reason
-    : !backend?.reachable
-      ? t("runtime.gpuReason.unreachable")
-      : backend.kind === "inference_only"
-        ? t("runtime.gpuReason.inference")
-        : backend.legacy
-          ? t("runtime.gpuReason.legacy")
-          : metricsError || t("runtime.gpuReason.unknown");
+  const reason = gpuUnavailableReason(t, metrics, metricsError, backend);
 
   return (
     <Notice tone="info" icon={<Cpu className="size-3.5" />}>

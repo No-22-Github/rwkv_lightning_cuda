@@ -859,8 +859,10 @@ func main() {
 		go func() { time.Sleep(350 * time.Millisecond); openBrowser(url) }()
 	}
 	log.Printf("RWKV Lightning Launcher %s: %s (role: %s)", launcherVersion, url, l.role())
-	// Display-only startup probes; results never gate any logic (I3).
+	// Display-only probes at startup and every probeInterval; results never
+	// gate any logic (I3).
 	go l.backends.probeAll(l.localBackend)
+	go l.backends.probeLoop(l.localBackend)
 	server := http.Server{Addr: l.listen, Handler: l.handler(), ReadHeaderTimeout: 5 * time.Second}
 	shutdown := make(chan os.Signal, 1)
 	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)

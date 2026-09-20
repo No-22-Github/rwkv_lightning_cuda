@@ -387,8 +387,12 @@ func stringSlice(v any) []string {
 	return out
 }
 
-// probeAll runs display-only startup probes (I3: results are shown, never
-// acted on). Runs in parallel; a dead backend cannot delay the others.
+// probeInterval keeps reachability and last_probe fresh without manual
+// re-probes; the frontend registry poll only lists, it never probes.
+const probeInterval = 30 * time.Second
+
+// probeAll runs display-only probes (I3: results are shown, never acted on).
+// Runs in parallel; a dead backend cannot delay the others.
 func (rg *registry) probeAll(local localProvider) {
 	rg.mu.Lock()
 	rg.ensureLoaded()
@@ -408,6 +412,16 @@ func (rg *registry) probeAll(local localProvider) {
 		go probe(e)
 	}
 	wg.Wait()
+}
+
+// probeLoop repeats probeAll forever so the registry reflects a backend that
+// came up or went down on its own, not only at startup.
+func (rg *registry) probeLoop(local localProvider) {
+	ticker := time.NewTicker(probeInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		rg.probeAll(local)
+	}
 }
 
 // forwardTransport deliberately has no overall or response-header timeout:

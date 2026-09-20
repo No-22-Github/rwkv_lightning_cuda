@@ -105,7 +105,7 @@ Runtime / Tuning / Quantization 请求体集中定义在 `request_types.go`，�
 
 剥前缀、换 token。Client 入口先执行 Host/Origin/Sec-Fetch-Site 校验，向后端转发时移除 `Origin` 和 `Sec-Fetch-Site`：这已是服务器间请求，目标 Host 与浏览器访问的 Client 不同。其余端到端 header、method、status、body 原样透传（**不 re-marshal**——Agent 侧 `decode()` 开了 `DisallowUnknownFields`，任何字段增删都会让跨版本请求 400）。SSE 路径设 `FlushInterval = -1`。转发传输层无整体/响应头超时（`/v1/model/load` 要等活跃推理排空，几十秒是正常的）。
 
-### 能力探测（Client，添加后端时与 probe 时各跑一次）
+### 能力探测（Client，启动时、每 30 秒、添加后端时与 probe 时各跑一次）
 
 1. `GET <base_url>/api/v1/node` → 200 且 `role=="agent"` → 全功能 Agent，读 `capabilities`。
 2. 否则 `GET <base_url>/api/status` → 200 且非 `role=="client"` → 老版本 Agent，标记 `legacy:true`，基础能力为 `runtime`；继续查询旧训练/量化 status，根据 `available` / `miss_available` 增加工具能力。不宣告 `fs`、`metrics` 或 `host_dialog`。若响应带 `role:"client"` 则明确报错（Client 不是 backend）。
@@ -430,6 +430,6 @@ type RuntimeState = ProcessStatus & {
 | `POST /api/v1/node/dialog/file` / `directory` | 无 | `{"path":"..."}`；取消时可能为空串 |
 | `POST /api/v1/node/dialog/reveal` | 无 | `{"ok":true}`，打开最近 checkpoint 所在目录，不接受任意 path |
 
-`BackendView` 字段见 §3，并包含 `legacy:boolean`。`kind` 探测成功为 `agent` / `inference_only`；未探测或失败时可为 `""`。`last_probe` 为 Unix 秒，0 表示未探测；探测结果只存在内存中。新增后端会先保存配置，再探测，HTTP 200 并不保证 `reachable:true`。没有编辑/更新后端的接口；改 token 或地址需删除再注册，ID 会变化。`local` 不能删除。
+`BackendView` 字段见 §3，并包含 `legacy:boolean`。`kind` 探测成功为 `agent` / `inference_only`；未探测或失败时可为 `""`。`last_probe` 为 Unix 秒，0 表示未探测；探测结果只存在内存中。Client 启动后每 30 秒对全部后端重跑展示型探测（I3：结果只用于显示，从不作门控），`reachable` 与 `last_probe` 随之刷新。新增后端会先保存配置，再探测，HTTP 200 并不保证 `reachable:true`。没有编辑/更新后端的接口；改 token 或地址需删除再注册，ID 会变化。`local` 不能删除。
 
 完整联调流程、错误码、同源约束、第三方 SDK、非 `/v1` 原生路径的转发限制，见 [联调指南](integration-guide.md)。

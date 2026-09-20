@@ -219,7 +219,7 @@ export function NodesPage() {
         </div>
       )}
 
-      {list.length > 0 && (
+      {list.some((backend) => !backend.reachable) && (
         <p className="mt-4 flex items-center gap-2 text-[11.5px] text-muted-foreground">
           <Boxes className="size-3.5" />
           {t("nodes.unreachableHint")}

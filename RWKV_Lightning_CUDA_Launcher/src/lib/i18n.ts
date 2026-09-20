@@ -135,7 +135,7 @@ const zh = {
     "添加一个远端 Agent 的根地址即可开始；纯 Client 形态下没有 local runtime 是正常状态。",
   "nodes.addBackend": "添加后端",
   "nodes.unreachableHint":
-    "最近一次探测不可达。可达性不等于 runtime ready，也不等于模型已加载。",
+    "可达性只代表最近一次探测连通，不等于 runtime ready，也不等于模型已加载。",
 
   "runtime.title": "Runtime",
   "runtime.subtitle":
@@ -533,7 +533,7 @@ const en: Record<MessageKey, string> = {
     "Register a remote Agent root address to get started. A pure Client without a local runtime is a valid state, not an error.",
   "nodes.addBackend": "Add backend",
   "nodes.unreachableHint":
-    "The last probe failed. Reachability is not runtime readiness, and neither means the model is loaded.",
+    "Reachability only means the last probe connected — it is not runtime readiness, and neither means the model is loaded.",
 
   "runtime.title": "Runtime",
   "runtime.subtitle":
