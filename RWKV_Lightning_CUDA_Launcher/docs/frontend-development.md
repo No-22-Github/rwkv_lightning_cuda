@@ -7,13 +7,16 @@
 | UI | React 19 + TypeScript | 页面与组件 |
 | 状态 | Zustand 5 | 表单、会话、任务与设置 |
 | 构建 | Vite 6 | 开发服务器与静态资源构建 |
-| 样式 | 当前为自定义 CSS；后续选用 Tailwind CSS | 页面设计与接入另做，不引入 HeroUI |
+| 样式 | Tailwind CSS 4（`@tailwindcss/vite`，CSS-first `@theme`） | 设计令牌与页面样式，不引入 HeroUI |
+| 组件 | shadcn 风格自建组件 + Radix primitives | Dialog / Popover 的焦点管理、键盘与可访问性 |
 | 包管理 | Bun，使用 `bun.lock` | 安装依赖与执行脚本 |
 | 开发工具链 | Bun（CI 使用 1.3.9） | 沿用原作者的依赖管理、脚本与测试配置 |
 | 测试 | Bun 内置测试（`bun:test`） | API/SSE、store 与服务端静态渲染测试 |
 | 生产服务 | Go Launcher | 内嵌 `dist/`、控制面、代理转发 |
 
-Bun 不是前端框架；它承担包管理、脚本运行和测试。项目沿用原作者的 Bun 工具链，开发与 CI 使用同一份锁文件。Tailwind 是 CSS 工具集，不提供完整的可访问组件；对话框、菜单、焦点管理与键盘交互仍需组件代码负责。
+Bun 不是前端框架；它承担包管理、脚本运行和测试。项目沿用原作者的 Bun 工具链，开发与 CI 使用同一份锁文件。Tailwind 是 CSS 工具集，不提供完整的可访问组件；对话框、菜单、焦点管理与键盘交互由 `@radix-ui/*` 与 `src/components/ui/` 负责。
+
+主题令牌定义在 `src/styles/globals.css`：`:root` 为浅色、`[data-theme="dark"]` 为深色，`@theme inline` 把它们映射成 Tailwind 颜色（`bg-card`、`text-muted-foreground`、`border-border` …）。默认主题是 `system`：`index.html` 的内联脚本在 React 挂载前读取 `rwkv-settings-v2`（缺省按 `prefers-color-scheme` 解析）写入 `data-theme`，`App` 再监听系统外观变化，避免首屏闪白。`settings` store 的 migrate 会把旧版本里硬编码的 `dark` 视为未选择并改为 `system`，显式的 `light` 保留。
 
 ## 安装、运行、验证
 
@@ -23,6 +26,7 @@ Bun 不是前端框架；它承担包管理、脚本运行和测试。项目沿�
 bun install --frozen-lockfile
 bun run test
 bun run lint
+bun run typecheck
 bun run build
 ```
 
@@ -46,44 +50,45 @@ Vite 默认端口 5173，`/api`、`/v1`、`/logs` 代理到 `127.0.0.1:10721`。
 
 ```text
 src/
-  app/                  应用壳、导航、全局轮询
-  pages/                Chat / Translate / Runtime / StateTuning / Settings
-  components/           通用控件、模型 state / adapter 管理
-  lib/api/              HTTP、推理接口、Launcher 接口、SSE parser
-  lib/translate/        分段与调度逻辑
+  app/                  应用壳（Header / Rail / 后端切换器）、全局轮询、当前节点上下文
+  pages/                Nodes / Chat / Translate / Runtime / Training / Quantization / Settings
+  components/
+    ui/                 shadcn 风格基础组件（button/input/select/card/dialog/popover/field/…）
+    chat/               Chat 页专用组件：气泡、输入区、生成参数面板、state / adapter 管理
+    *.tsx               通用控件：日志查看器、节点状态、远端路径字段、后端与目录对话框
+  lib/
+    api/                同源 HTTP 传输、控制面与推理接口、SSE parser、schema 类型与默认值
+    translate/          分段、语言白名单与调度逻辑
+    chat/html.ts        HTML 预览提取与沙箱包装
+    i18n.ts             zh / en 文案目录与 useI18n
+    router.ts           hash 路由（#/nodes、#/chat、#/translate、#/runtime、#/training、#/quant、#/settings）
   stores/               Zustand 状态与本地持久化
-  styles/
-    globals.css         现有主题变量与通用样式
-    aero.css            现有页面外观
-tests/                 Bun 测试
-docs/                  对接与开发文档
-dist/                  已跟踪的生产构建；由 Go embed
+  styles/globals.css    Tailwind 入口、主题令牌与 Markdown 排版
+tests/                  Bun 测试
+docs/                   对接与开发文档
+dist/                   已跟踪的生产构建；由 Go embed
 ```
 
 Go 侧：`main.go` 管进程、CLI 参数与启动；`api.go` 管控制路由和鉴权；`request_types.go` 集中定义进程控制请求体；`backends.go` 管注册表和转发；`legacy.go` 管旧协议适配；`fsbrowse.go` 管目录白名单；`devices.go` 管选卡；`metrics*.go` 管指标。构建必须使用 `go build .`，不能只编译 `main.go`。
 
-## 后续样式选型
+## 多后端前端架构
 
-前端改造确定使用 Tailwind CSS，不使用 HeroUI。本轮不安装 Tailwind、不修改页面、组件或样式；具体布局、视觉设计、组件体系及 Tailwind 接入由后续前端工作决定。
+浏览器只与本机 Client 同源通信，任何节点级请求都带 `/api/v1/backends/${id}` 前缀；`src/lib/api/http.ts` 是唯一的出口，禁止直接 fetch 后端的 `base_url`。
 
-实施时需注意 Tailwind Preflight 与现有全局 CSS 的交互；统一规划 CSS layer、主题变量、dark/light/system 和组件迁移，避免两套全局样式相互覆盖。Tailwind 不代替可访问组件的焦点管理、键盘导航和交互逻辑。
+- `stores/backends.ts`：注册表列表、当前 backend ID（持久化 `rwkv-backends-v1`）、`add` / `remove` / `probe` / `probeAll`。`hasCapability()` 是唯一的降级判据。
+- `stores/nodes.ts`：按 backend ID 保存 `NodeSnapshot`（`info` / `runtime` / `jobs` / `metrics`），并提供 runtime 与 jobs 的控制动作。`useCurrent()` 汇总当前节点上下文。
+- `stores/logs.ts`：runtime 与 jobs 的日志 SSE 连接，键为 `backendId:kind`，切换节点会关闭旧连接，重连会重放缓冲日志。
+- `stores/chat.ts`、`stores/translate.ts`：会话与翻译结果按 backend ID 隔离，翻译还记录 `owner`，切换节点不会串结果。
+- 轮询在 `app/App.tsx`：注册表 8s、runtime/jobs 1.6s、GPU 指标 6s；`NodesPage` 另外每 5s 刷新全部节点。
 
-## 多后端前端改造的起点
+能力降级：`kind:"inference_only"` 的节点只用推理 API，不显示起停进程、训练、量化、目录浏览与 GPU 指标；旧版 Agent（`legacy:true`）不宣告 `fs` / `metrics` / `host_dialog`；未知 capability 一律忽略。
 
-当前页面仍调用旧 alias，store 仍主要按单机组织。本轮代码与文档整理不代表多后端 UI 已完成。
+`visible_devices` 是三态字符串，不要退化成数字数组：`DeviceSelection` 的 `inherit` 会省略字段（沿用 Agent `--card` 或继承环境），`none` 发送 `""`（显式不注入），`explicit` 发送实际选卡串。`applyDevice()` 负责落到请求体。
 
-先阅读 [联调指南](integration-guide.md)，再落实：
-
-1. 建立 backend registry store、当前 backend ID 和统一同源请求前缀。
-2. 让 runtime/jobs/模型/state/adapter 状态按 backend ID 隔离，清理切换节点后的旧请求。
-3. 依据 capabilities / legacy / kind 实现功能降级及 Client 空状态。
-4. 迁移页面至新控制面，接远端目录浏览、GPU 指标和 `visible_devices`。
-5. Translate 显式调用 `/v1/batch/completions`；同批处理旧代理改写。
-
-控制面参考文档中的 schema 是新接口契约。现有 `src/lib/api/launcher.ts` 仅描述旧页面当前使用的部分字段，不能把它当完整新 API 定义。
+Translate 直接调用 `/v1/batch/completions`（不再依赖 Go 的 `contents → batch` 改写），每批最多 128 行，结果按 `choices[].index` 回填。
 
 ## 提交与构建产物
 
 仅维护 `bun.lock`，不用第二份包管理锁文件。增减依赖后用 Bun 更新锁文件；CI 使用 frozen install，执行 lint/test/build 后编译 Go。
 
-修改前端源码、依赖或样式后，应重新 `bun run build`，将 `dist/` 与源码、配置和锁文件一起提交。不要提交 node_modules、Go 本机二进制或临时缓存。Bun 测试中的静态渲染断言不等于浏览器视觉或真实 GPU 验收。
+修改前端源码、依赖或样式后，应重新 `bun run build`，将 `dist/` 与源码、配置和锁文件一起提交。不要提交 node_modules、Go 本机二进制或临时缓存。Bun 测试中的静态渲染断言不等于浏览器视觉或真实 GPU 验收；改动布局或主题后需在浏览器中确认，GPU 实机行为另做验收。

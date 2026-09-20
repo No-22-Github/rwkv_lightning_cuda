@@ -1,12 +1,10 @@
 import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
-import { RWKVClient, generationBody } from "../lib/api/client";
-import {
-  useSettings,
-  useSecret,
-  storage,
-  type GenerationSettings,
-} from "./settings";
+import { createJSONStorage, persist } from "zustand/middleware";
+import { generationBody } from "@/lib/api/client";
+import { inferenceApi } from "@/lib/api/inference";
+import type { StreamEvent } from "@/lib/api/sse";
+import { storage, useSettings } from "./settings";
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
@@ -14,158 +12,137 @@ export interface ChatMessage {
   error?: string;
   finishReason?: string;
 }
-export interface Conversation {
-  id: string;
-  title: string;
-  createdAt: number;
-  updatedAt: number;
-  messages: ChatMessage[];
-  settings?: GenerationSettings;
-}
-interface ChatStore {
-  conversations: Conversation[];
-  selected: string;
+
+interface ChatState {
+  /** One thread per backend ID: switching nodes never mixes conversations. */
+  threads: Record<string, ChatMessage[]>;
+  /** Backend ID currently streaming, or null. */
   active: string | null;
-  controller: AbortController | null;
-  newChat: () => string;
-  select: (id: string) => void;
-  rename: (id: string, title: string) => void;
-  remove: (id: string) => void;
-  clear: () => void;
-  send: (text: string, retry?: boolean) => Promise<void>;
+  send: (backendId: string, text: string, retry?: boolean) => Promise<void>;
   stop: () => void;
+  reset: (backendId: string) => void;
+  clearAll: () => void;
 }
+
+let controller: AbortController | null = null;
+
 export const useChat = create(
-  persist<ChatStore>(
+  persist<ChatState>(
     (set, get) => ({
-      conversations: [],
-      selected: "",
+      threads: {},
       active: null,
-      controller: null,
-      newChat: () => {
-        const id = crypto.randomUUID();
-        set((s) => ({
-          selected: id,
-          conversations: [
-            {
-              id,
-              title: "New conversation",
-              createdAt: Date.now(),
-              updatedAt: Date.now(),
-              messages: [],
-            },
-            ...s.conversations,
-          ],
-        }));
-        return id;
-      },
-      select: (id) => set({ selected: id }),
-      rename: (id, title) =>
-        set((s) => ({
-          conversations: s.conversations.map((c) =>
-            c.id === id ? { ...c, title: title.trim() || c.title } : c,
-          ),
-        })),
-      remove: (id) => {
-        if (get().active === id) get().stop();
-        set((s) => ({
-          conversations: s.conversations.filter((c) => c.id !== id),
-          selected: s.selected === id ? "" : s.selected,
-        }));
-      },
-      clear: () => {
-        get().stop();
-        set({ conversations: [], selected: "" });
-      },
-      stop: () => get().controller?.abort(),
-      send: async (text, retry = false) => {
-        if (get().active || (!retry && !text.trim())) return;
-        const id = get().selected || get().newChat();
-        let c = get().conversations.find((c) => c.id === id)!;
-        let messages = c.messages;
+
+      send: async (backendId, text, retry = false) => {
+        if (!backendId || get().active) return;
+        const existing = get().threads[backendId] ?? [];
+        if (retry ? existing.length === 0 : !text.trim()) return;
+
+        let history: ChatMessage[];
         if (retry) {
-          let last = messages.length - 1;
-          while (last >= 0 && messages[last].role !== "user") last--;
+          let last = existing.length - 1;
+          while (last >= 0 && existing[last].role !== "user") last--;
           if (last < 0) return;
-          messages = messages.slice(0, last + 1);
-        } else
-          messages = [
-            ...messages,
+          history = existing.slice(0, last + 1);
+        } else {
+          history = [
+            ...existing,
             { id: crypto.randomUUID(), role: "user", content: text.trim() },
           ];
+        }
+
         const reply: ChatMessage = {
           id: crypto.randomUUID(),
           role: "assistant",
           content: "",
         };
-        const controller = new AbortController();
-        const settings = { ...useSettings.getState().values.generation };
-        c = {
-          ...c,
-          title: c.messages.length ? c.title : messages[0].content.slice(0, 42),
-          updatedAt: Date.now(),
-          settings,
-          messages: [...messages, reply],
-        };
+        controller = new AbortController();
+        const signal = controller.signal;
         set((s) => ({
-          conversations: s.conversations.map((x) => (x.id === id ? c : x)),
-          active: id,
-          controller,
+          threads: { ...s.threads, [backendId]: [...history, reply] },
+          active: backendId,
         }));
-        let timer: ReturnType<typeof setTimeout> | undefined;
+
+        // Throttle store writes: a token stream would otherwise re-render on
+        // every single SSE frame.
+        let timer: number | undefined;
         const flush = () => {
-          clearTimeout(timer);
-          timer = undefined;
+          if (timer !== undefined) {
+            window.clearTimeout(timer);
+            timer = undefined;
+          }
           set((s) => ({
-            conversations: s.conversations.map((x) =>
-              x.id === id
-                ? {
-                    ...x,
-                    updatedAt: Date.now(),
-                    messages: x.messages.map((m) =>
-                      m.id === reply.id ? { ...reply } : m,
-                    ),
-                  }
-                : x,
-            ),
+            threads: {
+              ...s.threads,
+              [backendId]: (s.threads[backendId] ?? []).map((m) =>
+                m.id === reply.id ? { ...reply } : m,
+              ),
+            },
           }));
         };
+
         try {
-          const v = useSettings.getState().values;
-          await new RWKVClient(v.baseURL, useSecret.getState().key).streamChat(
+          const generation = useSettings.getState().generation;
+          await inferenceApi.streamChat(
+            backendId,
             {
-              ...generationBody(settings),
+              ...generationBody(generation),
               stream: true,
               stop_tokens: [0, 261, 24281],
-              messages: messages.map(({ role, content }) => ({
-                role,
-                content,
-              })),
+              messages: history.map(({ role, content }) => ({ role, content })),
             },
-            controller.signal,
-            (event) => {
-              for (const choice of event.choices || []) {
-                reply.content += choice.delta?.content || "";
+            signal,
+            (event: StreamEvent) => {
+              for (const choice of event.choices ?? []) {
+                reply.content += choice.delta?.content ?? "";
                 if (choice.finish_reason)
-                  reply.finishReason = choice.finish_reason;
+                  reply.finishReason = choice.finish_reason ?? undefined;
               }
-              if (!timer) timer = setTimeout(flush, 60);
+              if (timer === undefined) timer = window.setTimeout(flush, 60);
             },
           );
-        } catch (e) {
-          reply.error = controller.signal.aborted
+        } catch (error) {
+          reply.error = signal.aborted
             ? "Generation stopped."
-            : String(e);
+            : error instanceof Error
+              ? error.message
+              : String(error);
         } finally {
           flush();
-          set({ active: null, controller: null });
+          controller = null;
+          set({ active: null });
         }
+      },
+
+      stop: () => controller?.abort(),
+
+      reset: (backendId) =>
+        set((s) => {
+          const threads = { ...s.threads };
+          delete threads[backendId];
+          return { threads };
+        }),
+
+      clearAll: () => {
+        controller?.abort();
+        controller = null;
+        set({ threads: {}, active: null });
       },
     }),
     {
-      name: "rwkv-conversations-v1",
+      name: "rwkv-chat-v2",
+      version: 2,
       storage: createJSONStorage(() => storage),
-      partialize: (s) => ({ ...s, active: null, controller: null }),
+      partialize: (s) => ({ threads: s.threads }) as ChatState,
     },
   ),
 );
+
+const EMPTY_THREAD: ChatMessage[] = [];
+
+export function useThread(backendId: string) {
+  return useChat((s) => s.threads[backendId] ?? EMPTY_THREAD);
+}
+
+export function useStreaming(backendId: string) {
+  return useChat((s) => s.active === backendId);
+}

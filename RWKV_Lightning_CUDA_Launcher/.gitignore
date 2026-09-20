@@ -1,5 +1,7 @@
 node_modules/
 *.tsbuildinfo
+.bun-tmp/
+.bun-cache/
 !dist/
 !dist/**
 

@@ -1,4 +1,23 @@
 import { describe, it, expect } from "bun:test";
+
+/**
+ * These are pure-logic and server-render tests, but the persisted settings
+ * store still touches browser globals. Shim the minimum Bun does not provide.
+ */
+Object.defineProperty(globalThis, "window", {
+  configurable: true,
+  value: {
+    dispatchEvent: () => true,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    setTimeout: (handler: () => void, timeout?: number) =>
+      setTimeout(handler, timeout),
+    clearTimeout: (id: number) => clearTimeout(id),
+    setInterval: (handler: () => void, timeout?: number) =>
+      setInterval(handler, timeout),
+    clearInterval: (id: number) => clearInterval(id),
+  },
+});
 import { SSEParser, readSSE } from "../src/lib/api/sse";
 import { chunkText, translationPrompt } from "../src/lib/translate/chunk";
 import {
@@ -333,9 +352,13 @@ describe("generated HTML previews", () => {
   it("adds the preview action only to assistant HTML messages", async () => {
     const { createElement } = await import("react");
     const { renderToStaticMarkup } = await import("react-dom/server");
-    const { Message } = await import("../src/pages/ChatPage");
+    const { MessageBubble } = await import(
+      "../src/components/chat/message-bubble"
+    );
+    const { translate } = await import("../src/lib/i18n");
     const html = renderToStaticMarkup(
-      createElement(Message, {
+      createElement(MessageBubble, {
+        assistantName: "RWKV",
         message: {
           id: "answer",
           role: "assistant",
@@ -343,14 +366,18 @@ describe("generated HTML previews", () => {
         },
       }),
     );
-    expect(html).toContain("Preview HTML");
+    expect(html).toContain(translate("zh", "chat.preview"));
   });
   it("displays unfenced assistant HTML as one highlighted code block", async () => {
     const { createElement } = await import("react");
     const { renderToStaticMarkup } = await import("react-dom/server");
-    const { Message } = await import("../src/pages/ChatPage");
+    const { MessageBubble } = await import(
+      "../src/components/chat/message-bubble"
+    );
+    const { translate } = await import("../src/lib/i18n");
     const html = renderToStaticMarkup(
-      createElement(Message, {
+      createElement(MessageBubble, {
+        assistantName: "RWKV",
         message: {
           id: "raw-answer",
           role: "assistant",
@@ -363,14 +390,18 @@ describe("generated HTML previews", () => {
     expect(html).toContain("&lt;!DOCTYPE");
     expect(html).toContain('hljs-keyword">html</span>&gt;');
     expect(html).not.toContain("<blockquote>");
-    expect(html).toContain("Preview HTML");
+    expect(html).toContain(translate("zh", "chat.preview"));
   });
   it("renders the malformed model response as HTML code followed by prose", async () => {
     const { createElement } = await import("react");
     const { renderToStaticMarkup } = await import("react-dom/server");
-    const { Message } = await import("../src/pages/ChatPage");
+    const { MessageBubble } = await import(
+      "../src/components/chat/message-bubble"
+    );
+    const { translate } = await import("../src/lib/i18n");
     const html = renderToStaticMarkup(
-      createElement(Message, {
+      createElement(MessageBubble, {
+        assistantName: "RWKV",
         message: {
           id: "quoted-html-answer",
           role: "assistant",
@@ -382,7 +413,7 @@ describe("generated HTML previews", () => {
     expect(html).toContain('<code class="hljs language-html">');
     expect(html).toContain("<p>这是后续说明。</p>");
     expect(html).not.toContain("<blockquote>");
-    expect(html).toContain("Preview HTML");
+    expect(html).toContain(translate("zh", "chat.preview"));
   });
 });
 
@@ -413,19 +444,21 @@ it("uses the recommended state tuning defaults", () => {
 it("shows optimizer and shared WKV tape controls", async () => {
   const { createElement } = await import("react");
   const { renderToStaticMarkup } = await import("react-dom/server");
-  const { StateTuningPage } = await import("../src/pages/StateTuningPage");
-  const html = renderToStaticMarkup(createElement(StateTuningPage));
-  expect(html).toContain('<option value="adam" selected="">Adam</option>');
-  expect(html).toContain('<option value="muon">Muon</option>');
-  expect(html).toContain("Shared WKV tape");
-  expect(html).toContain("--optimizer adam");
+  const { TrainingPage } = await import("../src/pages/training-page");
+  const html = renderToStaticMarkup(createElement(TrainingPage));
+  // The optimizer select is a wire-value select, and MiSS pins it to adam.
+  expect(html).toContain('<option value="adam" selected="">adam</option>');
+  expect(html).toContain('<option value="muon">muon</option>');
+  expect(html).toContain("wkv_tape");
+  expect(html).toContain("State tuning");
+  expect(html).toContain("MiSS");
 });
 
 it("allows arbitrary positive learning-rate decimals in the tuning form", async () => {
   const { createElement } = await import("react");
   const { renderToStaticMarkup } = await import("react-dom/server");
-  const { StateTuningPage } = await import("../src/pages/StateTuningPage");
-  const html = renderToStaticMarkup(createElement(StateTuningPage));
+  const { TrainingPage } = await import("../src/pages/training-page");
+  const html = renderToStaticMarkup(createElement(TrainingPage));
   expect(html.match(/step="any"/g)).toHaveLength(2);
   expect(html).toContain('value="0.0005"');
   expect(html).toContain('value="0.0001"');

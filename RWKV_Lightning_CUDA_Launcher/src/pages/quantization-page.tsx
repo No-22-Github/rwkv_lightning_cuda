@@ -1,0 +1,288 @@
+import { useEffect, useState } from "react";
+import { Play, Square, TriangleAlert } from "lucide-react";
+import { useCurrent } from "@/app/use-current";
+import { CopyButton, PageHeader, PathField } from "@/components/common";
+import { LogViewer } from "@/components/log-viewer";
+import { StatusDot } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Field } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Notice, Progress } from "@/components/ui/primitives";
+import { Select } from "@/components/ui/select";
+import { applyDevice, suggestedQuantizedPath } from "@/lib/api/launcher";
+import type {
+  DeviceSelection,
+  QuantizationConfig,
+  QuantizationFormat,
+} from "@/lib/api/types";
+import { formatDuration } from "@/lib/format";
+import { useI18n } from "@/lib/i18n";
+import { hasCapability } from "@/stores/backends";
+import { useQuantizationForm } from "@/stores/forms";
+import { useLogs, useLogStream } from "@/stores/logs";
+import { useNodeBusy, useNodes } from "@/stores/nodes";
+import { toast } from "@/stores/ui";
+
+const LOG_ENDPOINT = "/api/v1/jobs/quantization/logs";
+
+/** `{mode}` is a three-state union: never collapse it into one string. */
+function DeviceField({
+  label,
+  selection,
+  onChange,
+  className,
+}: {
+  label: string;
+  selection: DeviceSelection;
+  onChange: (selection: DeviceSelection) => void;
+  className?: string;
+}) {
+  const { t } = useI18n();
+  const current = selection.mode === "explicit" ? selection.value : "";
+  return (
+    <Field label={label} hint={t("runtime.deviceHint")} className={className}>
+      <div className="grid gap-2">
+        <Select
+          value={selection.mode}
+          onChange={(event) => {
+            const mode = event.target.value;
+            if (mode === "explicit") onChange({ mode: "explicit", value: current });
+            else if (mode === "none") onChange({ mode: "none" });
+            else onChange({ mode: "inherit" });
+          }}
+        >
+          <option value="inherit">{t("runtime.deviceInherit")}</option>
+          <option value="none">{t("runtime.deviceNone")}</option>
+          <option value="explicit">{t("runtime.deviceExplicit")}</option>
+        </Select>
+        {selection.mode === "explicit" && (
+          <Input
+            value={selection.value}
+            placeholder="0"
+            onChange={(event) =>
+              onChange({ mode: "explicit", value: event.target.value })
+            }
+            className="font-mono text-xs"
+          />
+        )}
+      </div>
+    </Field>
+  );
+}
+
+export function QuantizationPage() {
+  const { t } = useI18n();
+  const { backendId, backend, jobs } = useCurrent();
+  const nodeBusy = useNodeBusy(backendId);
+  const { config, devices, set, setDevices } = useQuantizationForm();
+  /** True while `output_path` is still the value we derived from the input. */
+  const [autoOutput, setAutoOutput] = useState(false);
+  const { lines } = useLogStream(backendId, "quantization");
+
+  const quant = jobs?.quantization;
+  const progress = quant?.progress ?? null;
+  const outputPath = quant?.output_path ?? "";
+
+  useEffect(() => {
+    if (!backendId) return;
+    useLogs.getState().open(backendId, "quantization");
+    return () => useLogs.getState().close(backendId, "quantization");
+  }, [backendId]);
+
+  const supportsQuant = hasCapability(backend, "quantization");
+
+  const canStart =
+    Boolean(backendId) &&
+    config.input_path.trim() !== "" &&
+    config.output_path.trim() !== "" &&
+    supportsQuant &&
+    !nodeBusy &&
+    !quant?.running;
+
+  const derive = (
+    patch: Partial<QuantizationConfig>,
+    format: QuantizationFormat,
+    input: string,
+  ) => {
+    if (!config.output_path || autoOutput) {
+      patch.output_path = suggestedQuantizedPath(input, format);
+      setAutoOutput(true);
+    }
+    return patch;
+  };
+
+  const onInputChange = (value: string) => {
+    set(derive({ input_path: value }, config.format, value));
+  };
+
+  const onFormatChange = (value: string) => {
+    const format: QuantizationFormat = value === "w8a16" ? "w8a16" : "w4a16";
+    set(derive({ format }, format, config.input_path));
+  };
+
+  const start = async () => {
+    if (!backendId) return;
+    try {
+      await useNodes
+        .getState()
+        .startQuantization(backendId, applyDevice(config, devices));
+    } catch (error) {
+      toast.error(
+        t("toast.failed", {
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
+  };
+
+  const stop = async () => {
+    if (!backendId) return;
+    try {
+      await useNodes.getState().stopJob(backendId, "quantization");
+    } catch (error) {
+      toast.error(
+        t("toast.failed", {
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
+  };
+
+  return (
+    <div className="mx-auto max-w-[900px] px-6 pt-5.5 pb-10">
+      <PageHeader title={t("quant.title")} description={t("quant.subtitle")} />
+
+      {!supportsQuant && (
+        <Notice
+          tone="warning"
+          className="mt-4"
+          icon={<TriangleAlert className="size-3.5" />}
+        >
+          {t("quant.unsupported")}
+        </Notice>
+      )}
+
+      <Card className="mt-4 overflow-hidden">
+        <CardContent className="grid gap-3.5">
+          <PathField
+            label={t("quant.input")}
+            value={config.input_path}
+            onChange={onInputChange}
+            backendId={backendId}
+            hostDialog={hasCapability(backend, "host_dialog")}
+          />
+
+          <Field label={t("quant.output")}>
+            <Input
+              value={config.output_path}
+              onChange={(event) => {
+                setAutoOutput(false);
+                set({ output_path: event.target.value });
+              }}
+              className="font-mono text-xs"
+            />
+          </Field>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label={t("quant.format")}>
+              <Select value={config.format} onChange={(event) => onFormatChange(event.target.value)}>
+                <option value="w4a16">{t("quant.formatW4")}</option>
+                <option value="w8a16">{t("quant.formatW8")}</option>
+              </Select>
+            </Field>
+            <Field label={t("quant.groupSize")}>
+              <Select
+                value={config.group_size}
+                disabled={config.format === "w8a16"}
+                onChange={(event) =>
+                  set({
+                    group_size: Number(event.target.value) === 32 ? 32 : 128,
+                  })
+                }
+              >
+                <option value="128">{t("quant.group128")}</option>
+                <option value="32">{t("quant.group32")}</option>
+              </Select>
+            </Field>
+          </div>
+
+          <DeviceField
+            label={t("quant.visibleDevices")}
+            selection={devices}
+            onChange={setDevices}
+          />
+
+          <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
+            <Button variant="default" disabled={!canStart} onClick={start}>
+              <Play className="size-3.5" />
+              {t("quant.start")}
+            </Button>
+            <Button disabled={!quant?.running} onClick={stop}>
+              <Square className="size-3.5" />
+              {t("common.stop")}
+            </Button>
+            <span className="text-[11.5px] text-muted-foreground">
+              {t("quant.hint")}
+            </span>
+          </div>
+        </CardContent>
+      </Card>
+
+      {quant && (quant.running || quant.checkpoint) && (
+        <Card className="mt-3.5 overflow-hidden">
+          <CardHeader>
+            <CardTitle>{t("quant.progress")}</CardTitle>
+            <div className="flex-1" />
+            {quant.running && <StatusDot tone="warn" pulse />}
+            <span className="font-mono text-[11.5px] text-muted-foreground">
+              {formatDuration(quant.elapsed)}
+            </span>
+          </CardHeader>
+          <CardContent className="grid gap-3">
+            {progress?.total ? (
+              <div className="grid gap-1.5">
+                <span className="font-mono text-[11.5px] text-muted-foreground">
+                  {t("training.steps", {
+                    step: progress.step ?? 0,
+                    total: progress.total,
+                  })}
+                </span>
+                <Progress
+                  value={progress.step ?? 0}
+                  max={progress.total}
+                  tone="warning"
+                />
+              </div>
+            ) : null}
+
+            <div className="flex items-center gap-2">
+              <span className="shrink-0 text-[11px] text-muted-foreground">
+                {t("quant.outputPath")}
+              </span>
+              <span
+                className="min-w-0 flex-1 truncate font-mono text-[11.5px]"
+                title={outputPath}
+              >
+                {outputPath || "—"}
+              </span>
+              <CopyButton text={outputPath} size="xs" />
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <LogViewer
+        className="mt-3.5"
+        lines={lines}
+        title={t("quant.title")}
+        endpoint={LOG_ENDPOINT}
+      />
+    </div>
+  );
+}
