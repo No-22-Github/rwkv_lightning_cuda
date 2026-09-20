@@ -2,3 +2,8 @@ node_modules/
 *.tsbuildinfo
 !dist/
 !dist/**
+
+rwkv-lightning-launcher
+rwkv-lightning-launcher.exe
+rwkv_launcher
+rwkv_launcher.exe

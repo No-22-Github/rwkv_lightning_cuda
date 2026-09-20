@@ -1,6 +1,8 @@
 # Launcher 控制面 API 与多后端形态
 
-本文是 Launcher 多后端改造（Node Agent / Client 两角色）的落地文档，对应规格书《RWKV Lightning Launcher 多后端改造》§2–§8。C++ server 的 `/v1/*` 接口一字未动，见 `rwkv_lightning_api_doc.md` 与 `docs/http-api.md`。
+本文是 Launcher 控制面当前实现的接口参考。首次接入先读 [前端与第三方联调指南](integration-guide.md)；工程准备见 [前端开发指南](frontend-development.md)。原生推理 API 见 [完整参考](../../rwkv_lightning_api_doc.md) 与 [示例](../../docs/http-api.zh-CN.md)。
+
+Runtime / Tuning / Quantization 请求体集中定义在 `request_types.go`，路由在 `api.go`。§1–§6 介绍架构与兼容，§7–§8 给出请求字段、返回值与边界；旧设计草案不作为接口契约。
 
 ## 1. 三种形态、两个角色、一个二进制
 
@@ -167,7 +169,7 @@ Client 形态下 `/api/v1/node` 返回 404（`{"error":"client_only", …}`）�
 }
 ```
 
-`kind` 只有两个值：`agent` / `inference_only`。`token` 字段不出现在任何响应里。
+探测成功后 `kind` 为 `agent` / `inference_only`；尚未探测或探测失败时可为空字符串。`token` 字段不出现在任何响应里。
 
 ### `GET /api/v1/node/metrics`（Agent）
 
@@ -221,11 +223,15 @@ Client 形态下 `/api/v1/node` 返回 404（`{"error":"client_only", …}`）�
 
 ### 远程文件浏览 `POST /api/v1/node/fs`
 
-```json
-// 请求：省略 path 返回白名单根列表
-{ "path": "/data/models" }
+请求（省略 path 则返回白名单根列表）：
 
-// 响应
+```json
+{ "path": "/data/models" }
+```
+
+目录响应：
+
+```json
 { "path": "/data/models", "parent": "", "entries": [ { "name": "g1i-7b.pth", "is_dir": false, "size": 14700000000 } ] }
 ```
 
@@ -248,10 +254,182 @@ Client 形态下 `/api/v1/node` 返回 404（`{"error":"client_only", …}`）�
 | --- | --- |
 | T1 metrics 字段表 | schema 见上节（§6.3 已定稿）。NVML 字段全量可取（index/name/mem/util/temp/power，可选字段缺失即省略）。**rocm-smi 的实际 key 集合仍需在 W7900 目标机上确认**：解析按 key 后缀匹配（`VRAM Total Memory (B)`、`GPU use (%)`、`Temperature (Sensor junction|edge) (C)`、`Average Graphics Package Power (W)`、`Card series`），上机后如 label 有出入只需调 `metrics.go` 的后缀表 |
 | T2 capabilities 初始清单 | `runtime` / `tuning_state` / `tuning_miss` / `quantization` / `metrics` / `fs` / `host_dialog`（仅本机全套）。量化**不**按 w8a16/w4a16 拆位：一个 `rwkv_quantize` 二进制同时支持两种 format，format 是任务参数不是部署属性 |
-| T3 token 生成与分发 | 由操作者经 `--token` 显式提供，不自动生成（自动生成的 token 会进启动日志）。存储位置：只存在于启动参数/进程内，不落盘。轮换：用新 token 重启 Agent，再在各 Client 上更新对应后端的 token |
+| T3 token 生成与分发 | 由操作者经 `--token` 显式提供，不自动生成（自动生成的 token 会进启动日志）。存储位置：只存在于启动参数/进程内，不落盘。轮换：用新 token 重启 Agent，再在各 Client 上删除再注册对应后端（当前没有更新接口，ID 会变化） |
 | T4 Client 配置文件位置 | `~/.rwkv_launcher/launcher.json`（macOS/Linux `$HOME`，Windows `%USERPROFILE%`），权限 0600，`--config` 可覆盖。理由：注册表是用户级状态，必须活过 launcher 二进制升级与「每卡一个文件夹」的整目录替换；appDir 会随构建/部署位置漂移 |
 
 ## 6. 构建注意
 
-- 包已拆为多文件（`main.go` / `api.go` / `backends.go` / `fsbrowse.go` / `metrics*.go` / `devices.go`），构建/运行命令用包路径：`go build .` / `go run .`，不能再 `go build main.go`。
+- 包已拆为多文件（`main.go` / `request_types.go` / `api.go` / `backends.go` / `legacy.go` / `fsbrowse.go` / `metrics*.go` / `devices.go`），构建/运行命令用包路径：`go build .` / `go run .`，不能再 `go build main.go`。
 - Linux 启用 NVML 需要 `CGO_ENABLED=1 go build .`（只需 gcc 与 libdl，不需要 CUDA toolkit）；`CGO_ENABLED=0` 构建可用，metrics 走 available=false 分支。macOS/Windows 构建不受影响（NVML 文件带 `//go:build linux && cgo` 约束）。
+
+## 7. 请求体与进程状态完整参考
+
+以下字段对应 `request_types.go`，JSON 使用 snake_case。控制面 JSON 解码上限 1 MiB，拒绝未知字段与尾随数据；路径都属于 Agent 主机，相对路径按 Launcher 可执行文件目录解释。前端建议提交完整配置，避免误用服务器已有配置或 Go 零值。
+
+### RuntimeConfig
+
+用于 `POST /api/v1/runtime/start`。start 在上次保存的配置上解码，因此省略字段会保留已有值（包括曾显式指定的 `visible_devices`）；首次启动的默认值不应被当成每次请求都会重新应用。restart 使用已保存配置，不使用请求体里的新表单。
+
+| 字段 | JSON 类型 | 含义 / 校验 |
+| --- | --- | --- |
+| `model_path` | string | 必须存在；动态加载模式为目录，否则为模型文件 |
+| `vocab_path` | string | 词表文件；空值使用 `./rwkv_vocab_v20230424.txt` |
+| `port` | **string** | 原生服务端口，如 `"8000"`，1–65535，不能与 Launcher 端口冲突 |
+| `password` | string | 原生服务密码；与 Agent token 不同；状态接口回显为空 |
+| `use_wkv32` | boolean | 注入 `--wkv32` |
+| `chunk_load` | boolean | 注入 `--chunk-load` |
+| `enable_dynamic_loading` | boolean | 注入 `--enable-dynamic-loading` |
+| `chunk_size` | integer | prefill 大小；0 按 128，负数拒绝 |
+| `state_db_path` | string | 会话数据库路径；空串不传对应 CLI 参数 |
+| `tune_cache` | string | 调优缓存路径；缺省时按选卡策略处理 |
+| `visible_devices` | string，可省略 | 缺省沿用 Agent 配置，空串显式不注入，见 §3 |
+
+```json
+{
+  "model_path": "/data/models/model.pth",
+  "vocab_path": "/data/rwkv_vocab_v20230424.txt",
+  "port": "8000",
+  "password": "",
+  "use_wkv32": false,
+  "chunk_load": false,
+  "enable_dynamic_loading": false,
+  "chunk_size": 128,
+  "state_db_path": "rwkv_sessions.db",
+  "tune_cache": "",
+  "visible_devices": "0"
+}
+```
+
+Start / stop / restart 成功均为 `200 {"ok":true}`。start 成功不等于模型 ready；继续轮询 runtime 状态。Client 形态下 start/restart 返回 404；runtime stop 为兼容保留无本地进程时的幂等成功，runtime 日志入口也不做 Agent gate。调用者仍应先按角色与能力选择功能。
+
+### TuningConfig
+
+用于 `POST /api/v1/jobs/tuning`。训练请求从零值解码，**不会自动套用前端表单的默认值**；必须提供有效数值。`state` 与 `miss` 共用同一个训练进程槽。
+
+| 字段 | JSON 类型 | 含义 / 校验 |
+| --- | --- | --- |
+| `method` | string | `state` 或 `miss`；空值按 state |
+| `model` | string | 已存在的 BF16 `.pth` 基模，不接受 `.rwkvq` |
+| `data` | string | 已存在的 JSONL 文件；非空行恰好一个字符串 `text` 字段 |
+| `output` | string | 非空输出目录路径 |
+| `vocab` | string | 可选词表文件；非空时须存在 |
+| `ctx` / `chunk` | integer | 均 > 0，`chunk <= ctx` |
+| `epochs` | integer | > 0 |
+| `batch_size` | integer | 1–128 |
+| `max_steps` | integer | >= 0，0 不额外限制步数 |
+| `lr` / `lr_final` | number | 均 > 0 |
+| `warmup_steps` / `save_every` / `seed` | integer | 均 >= 0 |
+| `optimizer` | string | `adam` 或 `muon`；空值按 adam，MiSS 仅接受 adam |
+| `wkv_tape` | boolean | 共享 WKV tape 开关 |
+| `rank` | integer | MiSS 必须 1–1024；state 模式不使用 |
+| `alpha` | number | MiSS alpha，透传训练 CLI；state 模式不使用 |
+| `targets` | string | MiSS 的 `all`，或下列目标名的逗号分隔列表，不能重复 |
+| `state` | string | MiSS 可选初始 state 文件，须存在 |
+| `resume` | string | MiSS 可选续训目录，须存在 |
+| `visible_devices` | string，可省略 | 同 RuntimeConfig |
+
+MiSS 目标：`att.receptance.weight`、`att.key.weight`、`att.value.weight`、`att.output.weight`、`ffn.key.weight`、`ffn.value.weight`。`state` / `resume` 字段目前仅在 MiSS 模式被使用，不要把它们解释成 state tuning 的通用续训接口。
+
+有效的 state tuning 请求示例（路径需替换）：
+
+```json
+{
+  "method": "state",
+  "model": "/data/models/model.pth",
+  "data": "/data/train.jsonl",
+  "output": "/data/state_output",
+  "vocab": "/data/rwkv_vocab_v20230424.txt",
+  "ctx": 512,
+  "chunk": 128,
+  "epochs": 1,
+  "batch_size": 16,
+  "max_steps": 0,
+  "lr": 0.0005,
+  "lr_final": 0.0001,
+  "warmup_steps": 10,
+  "save_every": 100,
+  "seed": 1234,
+  "optimizer": "adam",
+  "wkv_tape": false,
+  "visible_devices": "0"
+}
+```
+
+MiSS 请求在此基础上改 `method:"miss"`，补 `rank:16`、`alpha:16`、`targets:"all"`，按需补 `state` / `resume`。启动成功为 `200 {"ok":true}`。预先验证数据集：`POST /api/v1/jobs/tuning/validate`，body `{"path":"/data/train.jsonl"}`，成功返回 `{"samples":123}`；只校验格式，不代表训练已成功。
+
+### QuantizationConfig
+
+用于 `POST /api/v1/jobs/quantization`：
+
+```json
+{
+  "input_path": "/data/models/model.pth",
+  "output_path": "/data/models/model.w4a16.rwkvq",
+  "format": "w4a16",
+  "group_size": 128,
+  "visible_devices": "0"
+}
+```
+
+| 字段 | JSON 类型 | 含义 / 校验 |
+| --- | --- | --- |
+| `input_path` | string | 已存在的 BF16 `.pth` 模型 |
+| `output_path` | string | `.rwkvq` 路径，父目录须存在；文件须尚不存在，不能覆盖输入 |
+| `format` | string | `w8a16` 或 `w4a16`，空值按 w4a16 |
+| `group_size` | integer | W4A16 为 32/128；0 按 128；W8A16 不使用 |
+| `visible_devices` | string，可省略 | 同 RuntimeConfig |
+
+启动成功为 `200 {"ok":true}`。训练/量化的 `POST /api/v1/jobs/{id}/stop` 成功为 **HTTP 200 空响应体**，不要无条件 `response.json()`；旧版 Agent 返回体可能不同，应允许空体或成功 JSON。
+
+### ProcessStatus 与 RuntimeState
+
+`GET /api/v1/jobs` 返回 `{"jobs":{"tuning":ProcessStatus,"quantization":ProcessStatus}}`，单项 `GET /api/v1/jobs/{id}` 直接返回状态对象。
+
+```ts
+type ProcessStatus = {
+  status: "offline" | "starting" | "ready" | "stopping" | "error" | "running" | "completed";
+  running: boolean;
+  error: string;
+  logs: string[];
+  elapsed: number; // 秒
+  checkpoint: string; // 最近真实保存的路径，没有则为空串
+  progress: null | {
+    step?: number; total?: number; epoch?: number; epochs?: number;
+    loss?: number; lr?: number; tokens_per_second?: number; eta?: number;
+  };
+  losses: { step: number; loss: number }[];
+  available?: boolean; // 对应工具是否存在
+  miss_available?: boolean; // 仅 tuning，MiSS 工具是否存在
+  output_path?: string; // 仅 quantization
+};
+
+type RuntimeState = ProcessStatus & {
+  config: RuntimeConfig; // password 永远为空
+  base_url: string; // Agent 本机 runtime 地址，只用于展示，浏览器不直接连接
+  translation_adapter: boolean; // 当前旧 WebUI 兼容标记
+  available: boolean;
+  visible_devices: string;
+  backend?: Record<string, unknown>; // ready 探测成功时的原生 /v1/server/status 响应
+};
+```
+
+`GET /api/v1/node` 在 RuntimeState 上加 `role:"agent"`、`version` 和 `capabilities`；本机全套也以 `role:"agent"` 对外报告。状态数据中的未知字段应忽略，`progress` 可为 null，不得假造训练指标。
+
+日志：`GET /api/v1/runtime/logs` 和 `GET /api/v1/jobs/{id}/logs` 均为 `text/event-stream`，每个 `data:` 内容是一行纯文本，无 JSON 包装、无 `[DONE]`、无 `Last-Event-ID` 支持。停止进程不会关闭日志连接；断开由调用方取消请求完成。重新连接会重发当前缓冲日志。
+
+## 8. 注册表与辅助接口返回值
+
+| 请求 | 请求体 | 成功返回 |
+| --- | --- | --- |
+| `GET /api/v1/backends` | 无 | `{"backends":[BackendView,...]}` |
+| `POST /api/v1/backends` | `{"name":"...","base_url":"http://host:18766","token":"..."}` | 单个 BackendView，HTTP 200 |
+| `DELETE /api/v1/backends/{id}` | 无 | `{"ok":true}` |
+| `POST /api/v1/backends/{id}/probe` | 无 | 单个 BackendView，HTTP 200 |
+| `POST /api/v1/node/fs` | `{}` 或 `{"path":""}` | `{"roots":["/data",...]}` |
+| `POST /api/v1/node/fs` | `{"path":"/data"}` | `{"path":"/data","parent":"","entries":[...]}` |
+| `POST /api/v1/node/dialog/file` / `directory` | 无 | `{"path":"..."}`；取消时可能为空串 |
+| `POST /api/v1/node/dialog/reveal` | 无 | `{"ok":true}`，打开最近 checkpoint 所在目录，不接受任意 path |
+
+`BackendView` 字段见 §3，并包含 `legacy:boolean`。`kind` 探测成功为 `agent` / `inference_only`；未探测或失败时可为 `""`。`last_probe` 为 Unix 秒，0 表示未探测；探测结果只存在内存中。新增后端会先保存配置，再探测，HTTP 200 并不保证 `reachable:true`。没有编辑/更新后端的接口；改 token 或地址需删除再注册，ID 会变化。`local` 不能删除。
+
+完整联调流程、错误码、同源约束、第三方 SDK、非 `/v1` 原生路径的转发限制，见 [联调指南](integration-guide.md)。
