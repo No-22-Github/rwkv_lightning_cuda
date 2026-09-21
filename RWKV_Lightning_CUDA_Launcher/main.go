@@ -489,7 +489,7 @@ func existingPath(path string, dir bool) error {
 	}
 	return nil
 }
-func (l *launcher) runtimeArgs(req startRequest) ([]string, error) {
+func (l *launcher) runtimeArgs(req startRequest, devices resolvedDevices) ([]string, error) {
 	if err := existingPath(req.ModelPath, req.EnableDynamicLoading); err != nil {
 		return nil, fmt.Errorf("model: %w", err)
 	}
@@ -524,7 +524,10 @@ func (l *launcher) runtimeArgs(req startRequest) ([]string, error) {
 	if tuneCache == "" {
 		// §5.8(c): with a pinned card the default tune cache is card-bound
 		// so a card switch cannot silently reuse another card's tuning.
-		tuneCache = deviceTuneCache(req, l.resolveVisibleDevices(req.VisibleDevices))
+		// `devices` was resolved once by the caller: re-resolving here would
+		// let auto placement sample free VRAM twice and pin the process and
+		// its tune cache to different cards.
+		tuneCache = deviceTuneCache(req, devices)
 	}
 	for _, pair := range [][2]string{{"--password", req.Password}, {"--state-db-path", req.StateDBPath}, {"--tune-cache", tuneCache}} {
 		if pair[1] != "" {
@@ -551,7 +554,7 @@ func (l *launcher) start(req startRequest) error {
 	if l.runtime.active() {
 		return fmt.Errorf("backend is already running")
 	}
-	args, err := l.runtimeArgs(req)
+	args, err := l.runtimeArgs(req, devices)
 	if err != nil {
 		return err
 	}
@@ -565,6 +568,9 @@ func (l *launcher) start(req startRequest) error {
 	}
 	if err = l.runtime.launch(backendExecutable(), args, req.Password, devices.spec); err != nil {
 		return err
+	}
+	if devices.auto {
+		l.runtime.appendLog("auto device placement: GPU " + devices.spec + " (most free VRAM)")
 	}
 	l.config = req
 	l.runtimeDevices = devices

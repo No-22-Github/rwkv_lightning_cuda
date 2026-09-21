@@ -85,15 +85,58 @@ func TestResolveVisibleDevices(t *testing.T) {
 		t.Fatalf("--card applies when the request is silent: %+v", r)
 	}
 	l.card = ""
-	if r := l.resolveVisibleDevices(nil); r.explicit {
-		t.Fatalf("silent request without card or env must stay unpinned: %+v", r)
+	// The device-0 status quo is gone: a silent request now auto-places on
+	// the freest card. Stub the sampler — the real one depends on the host.
+	restore := autoDeviceSpec
+	autoDeviceSpec = func() string { return "5" }
+	defer func() { autoDeviceSpec = restore }()
+	if r := l.resolveVisibleDevices(nil); !r.explicit || !r.auto || r.spec != "5" {
+		t.Fatalf("silent request must auto-place: %+v", r)
 	}
-	t.Setenv("CUDA_VISIBLE_DEVICES", "3")
+	autoDeviceSpec = func() string { return "" }
 	if r := l.resolveVisibleDevices(nil); r.explicit {
-		t.Fatalf("inherited env is not an explicit pin: %+v", r)
+		t.Fatalf("unsampleable host must stay unpinned: %+v", r)
+	}
+	autoDeviceSpec = restore
+	t.Setenv("CUDA_VISIBLE_DEVICES", "3")
+	if r := l.resolveVisibleDevices(nil); r.explicit || r.auto {
+		t.Fatalf("inherited env wins over auto placement and is not explicit: %+v", r)
 	}
 	if r := l.resolveVisibleDevices(&spec); !r.explicit || r.spec != "0,1" {
 		t.Fatalf("request overrides inherited env: %+v", r)
+	}
+}
+
+func TestPickFreestDevice(t *testing.T) {
+	if got := pickFreestDevice(nil); got != "" {
+		t.Fatalf("empty GPU list: %q", got)
+	}
+	gpus := []gpuSample{
+		{Index: 0, MemoryTotalBytes: 48 << 30, MemoryUsedBytes: 12 << 30},
+		{Index: 1, MemoryTotalBytes: 96 << 30, MemoryUsedBytes: 60 << 30},
+		{Index: 2, MemoryTotalBytes: 96 << 30, MemoryUsedBytes: 0},
+	}
+	// Most free, not least used: card 0 (36 GiB free) beats the busier 96G
+	// card, but the empty 96G card wins overall.
+	if got := pickFreestDevice(gpus[:2]); got != "0" {
+		t.Fatalf("picked %q, want 0", got)
+	}
+	if got := pickFreestDevice(gpus); got != "2" {
+		t.Fatalf("picked %q, want 2", got)
+	}
+}
+
+func TestFreestFromSmiCSV(t *testing.T) {
+	// nounits output is bare MiB; a unit-suffixed row is skipped, which is
+	// fine — real nvidia-smi never emits one with these flags.
+	csv := "0, 12288\n1, 81052\n2, 12288 MiB\n"
+	if got := freestFromSmiCSV(csv); got != "1" {
+		t.Fatalf("picked %q, want 1", got)
+	}
+	for _, broken := range []string{"", "GPU-abc, 81052 MiB", "0, -5 MiB", "no gpu output"} {
+		if got := freestFromSmiCSV(broken); got != "" {
+			t.Fatalf("broken input %q: picked %q, want empty", broken, got)
+		}
 	}
 }
 
@@ -134,7 +177,7 @@ func TestRuntimeArgsInjectsDeviceTuneCache(t *testing.T) {
 	vocab := testFile(t, "vocab.txt", "vocab")
 	req := startRequest{ModelPath: model, VocabPath: vocab, Port: "8000", StateDBPath: "sessions.db"}
 	dev := "0,1"
-	args, err := l.runtimeArgs(req)
+	args, err := l.runtimeArgs(req, resolvedDevices{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +185,7 @@ func TestRuntimeArgsInjectsDeviceTuneCache(t *testing.T) {
 		t.Fatalf("expected no --tune-cache without visible_devices: %v", args)
 	}
 	req.VisibleDevices = &dev
-	args, err = l.runtimeArgs(req)
+	args, err = l.runtimeArgs(req, resolvedDevices{spec: "0,1", explicit: true})
 	if err != nil {
 		t.Fatal(err)
 	}

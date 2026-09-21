@@ -150,11 +150,12 @@ const zh = {
   "runtime.dynamicLoading": "从目录按需加载模型（动态加载）",
   "runtime.device": "设备与端口",
   "runtime.deviceMode": "选卡策略",
-  "runtime.deviceInherit": "缺省 · 沿用 Agent --card / 继承环境",
+  "runtime.deviceInherit":
+    "缺省 · 沿用 --card / 环境，无则按空闲显存自动选卡",
   "runtime.deviceNone": "空串 · 显式不注入",
   "runtime.deviceExplicit": "显式选卡",
   "runtime.deviceHint":
-    "缺省、空串与显式 \"0\" 是三种不同语义，不要互相替代。",
+    "缺省、空串与显式 \"0\" 是三种不同语义。缺省且无 --card / 继承环境时，Agent 会把进程放到空闲显存最大的卡上，选卡结果记录在日志里。",
   "runtime.port": "端口",
   "runtime.password": "runtime 密码",
   "runtime.passwordHint": "与 Agent token 不同；状态接口永远回显为空",
@@ -550,11 +551,11 @@ const en: Record<MessageKey, string> = {
   "runtime.dynamicLoading": "Load models on demand from a directory",
   "runtime.device": "Device & server",
   "runtime.deviceMode": "Device selection",
-  "runtime.deviceInherit": "Default · inherit Agent --card / env",
+  "runtime.deviceInherit": "Default · --card / env, else auto-pick freest GPU",
   "runtime.deviceNone": "Empty string · explicitly inject nothing",
   "runtime.deviceExplicit": "Explicit devices",
   "runtime.deviceHint":
-    'Default, empty string and an explicit "0" are three different semantics.',
+    'Default, empty string and an explicit "0" are three different semantics. With no --card and no inherited env, the Agent pins the process to the GPU with the most free VRAM and logs the choice.',
   "runtime.port": "Port",
   "runtime.password": "Runtime password",
   "runtime.passwordHint":

@@ -44,7 +44,7 @@ func testFile(t *testing.T, name, contents string) string {
 func TestRuntimeArgs(t *testing.T) {
 	l := newLauncher()
 	req := startRequest{ModelPath: testFile(t, "with spaces.pth", "model"), VocabPath: testFile(t, "vocab.txt", "vocab"), Port: "8000", Password: "secret value", UseWKV32: true, ChunkLoad: true, ChunkSize: 64, StateDBPath: "cache path.db", TuneCache: "cache.tune"}
-	args, e := l.runtimeArgs(req)
+	args, e := l.runtimeArgs(req, resolvedDevices{})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -55,22 +55,22 @@ func TestRuntimeArgs(t *testing.T) {
 	// Port 8088 is a legal runtime port now that the launcher listens on
 	// 10721; the launcher's own HTTP port stays reserved.
 	req.Port = "8088"
-	if _, e = l.runtimeArgs(req); e != nil {
+	if _, e = l.runtimeArgs(req, resolvedDevices{}); e != nil {
 		t.Fatal("rejected runtime port 8088", e)
 	}
 	for _, port := range []string{"0", "65536", "10721", "oops", "-1"} {
 		req.Port = port
-		if _, e = l.runtimeArgs(req); e == nil {
+		if _, e = l.runtimeArgs(req, resolvedDevices{}); e == nil {
 			t.Fatalf("accepted port %s", port)
 		}
 	}
 	req.Port = "8000"
 	req.EnableDynamicLoading = true
-	if _, e = l.runtimeArgs(req); e == nil {
+	if _, e = l.runtimeArgs(req, resolvedDevices{}); e == nil {
 		t.Fatal("dynamic loading accepted a file")
 	}
 	req.ModelPath = t.TempDir()
-	if _, e = l.runtimeArgs(req); e != nil {
+	if _, e = l.runtimeArgs(req, resolvedDevices{}); e != nil {
 		t.Fatal(e)
 	}
 }

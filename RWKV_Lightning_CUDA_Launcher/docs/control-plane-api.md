@@ -211,7 +211,11 @@ Client 形态下 `/api/v1/node` 返回 404（`{"error":"client_only", …}`）�
 1. 请求体 `visible_devices`（`""` = 显式不注入，与缺省不同）
 2. Agent 启动参数 `--card <spec>`
 3. Agent 进程自己继承的 `CUDA_VISIBLE_DEVICES`（子进程原样继承，不注入）
-4. 都没有 → 不注入（device 0，现状）
+4. 都没有 → **自动选卡**：Agent 采样各卡空闲显存（NVML，Windows 无 NVML 绑定时退回一次
+   `nvidia-smi --query-gpu=index,memory.free`），把子进程钉到空闲最大的卡，并标记为显式
+   （参与按卡互斥、tune cache 跟卡）；选卡结果以 `auto device placement: GPU <n>` 写入对应
+   子进程日志。采样不可用时退回旧行为：不注入（子进程看见全部卡，驱动落 device 0）。
+   自动放置按「空闲显存最大」而非「占用率最低」——一张 48G 卡用掉 20% 仍优于一张空的 24G 卡。
 
 注入方式：spawn 子进程时改写环境变量——NVIDIA 设 `CUDA_VISIBLE_DEVICES`；AMD 设 `HIP_VISIBLE_DEVICES` + `ROCR_VISIBLE_DEVICES`（厂商判断复用 metrics 的 vendor）。三个设备变量先全部移除再注入，避免继承值与注入值叠加。
 

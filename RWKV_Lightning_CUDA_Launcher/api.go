@@ -423,6 +423,9 @@ func (l *launcher) handleTuningStart(w http.ResponseWriter, r *http.Request) err
 	if e = l.tuning.launch(filepath.Join(appDir(), name), args, "", devices.spec); e != nil {
 		return e
 	}
+	if devices.auto {
+		l.tuning.appendLog("auto device placement: GPU " + devices.spec + " (most free VRAM)")
+	}
 	l.tuningDevices = devices
 	l.tuningConfig = req
 	l.recordFSConfigs(l.config, req, l.quantizationConfig)
@@ -464,6 +467,9 @@ func (l *launcher) handleQuantizationStart(w http.ResponseWriter, r *http.Reques
 	devices := l.resolveVisibleDevices(req.VisibleDevices)
 	if e = l.quantization.launch(exe, args, "", devices.spec); e != nil {
 		return e
+	}
+	if devices.auto {
+		l.quantization.appendLog("auto device placement: GPU " + devices.spec + " (most free VRAM)")
 	}
 	l.quantDevices = devices
 	l.quantizationConfig = req
