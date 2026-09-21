@@ -150,12 +150,15 @@ const zh = {
   "runtime.dynamicLoading": "从目录按需加载模型（动态加载）",
   "runtime.device": "设备与端口",
   "runtime.deviceMode": "选卡策略",
-  "runtime.deviceInherit":
-    "缺省 · 沿用 --card / 环境，无则按空闲显存自动选卡",
-  "runtime.deviceNone": "空串 · 显式不注入",
-  "runtime.deviceExplicit": "显式选卡",
+  "runtime.deviceAuto": "自动 · 沿用 --card / 继承环境，无则选空闲显存最大的卡",
+  "runtime.deviceExplicit": "指定",
+  "runtime.devicePinned": "已由 --card 钉定",
+  "runtime.devicePinnedHint":
+    "launcher 以 --card {card} 启动，只能使用该卡，其他选卡会被拒绝。",
+  "runtime.deviceNoMetricsHint":
+    "读不到 GPU 列表（旧版 Agent 或无指标），手动填写选卡串，如 0 或 0,1。",
   "runtime.deviceHint":
-    "缺省、空串与显式 \"0\" 是三种不同语义。缺省且无 --card / 继承环境时，Agent 会把进程放到空闲显存最大的卡上，选卡结果记录在日志里。",
+    "自动模式由 Agent 决定选卡（结果记录在日志里）；指定模式从下拉框选卡。launcher 以 --card 启动时，该卡是唯一允许的选择。",
   "runtime.port": "端口",
   "runtime.password": "runtime 密码",
   "runtime.passwordHint": "与 Agent token 不同；状态接口永远回显为空",
@@ -179,7 +182,6 @@ const zh = {
   "runtime.logs": "运行日志",
   "runtime.logsEmpty": "暂无日志输出。启动 runtime 后这里会实时刷新。",
   "runtime.copyLogs": "复制",
-  "runtime.startHint": "启动成功不等于模型 ready，继续等待状态变为 ready。",
   "runtime.unsupported":
     "该节点是裸推理节点，不能起停进程、训练、量化或浏览目录。",
   "runtime.started": "已发送启动请求",
@@ -560,11 +562,15 @@ const en: Record<MessageKey, string> = {
   "runtime.dynamicLoading": "Load models on demand from a directory",
   "runtime.device": "Device & server",
   "runtime.deviceMode": "Device selection",
-  "runtime.deviceInherit": "Default · --card / env, else auto-pick freest GPU",
-  "runtime.deviceNone": "Empty string · explicitly inject nothing",
-  "runtime.deviceExplicit": "Explicit devices",
+  "runtime.deviceAuto": "Auto · --card / inherited env, else the freest GPU",
+  "runtime.deviceExplicit": "Explicit",
+  "runtime.devicePinned": "pinned by --card",
+  "runtime.devicePinnedHint":
+    "The launcher was started with --card {card}; only this card is allowed and other picks are refused.",
+  "runtime.deviceNoMetricsHint":
+    "The GPU list is unavailable (legacy agent or no metrics) — type a spec like 0 or 0,1.",
   "runtime.deviceHint":
-    'Default, empty string and an explicit "0" are three different semantics. With no --card and no inherited env, the Agent pins the process to the GPU with the most free VRAM and logs the choice.',
+    "Auto lets the Agent choose the card (the choice is logged); Explicit picks one from the dropdown. With --card at launcher startup, that card is the only allowed choice.",
   "runtime.port": "Port",
   "runtime.password": "Runtime password",
   "runtime.passwordHint":
@@ -590,8 +596,6 @@ const en: Record<MessageKey, string> = {
   "runtime.logsEmpty":
     "No log output yet. Start the runtime and this fills in live.",
   "runtime.copyLogs": "Copy",
-  "runtime.startHint":
-    "A successful start is not a ready model; keep polling until the status is ready.",
   "runtime.unsupported":
     "This is an inference-only node: no process control, training, quantization or directory browsing.",
   "runtime.started": "Start request sent",

@@ -264,7 +264,10 @@ export function GpuList({
 }) {
   if (metrics?.available && metrics.gpus.length > 0) {
     return (
-      <div className="grid grid-cols-[minmax(0,1fr)] gap-2.5">
+      // Auto-fill columns: two cards side by side on the runtime page, more
+      // on wide screens, so an 8-GPU box wraps instead of growing a column
+      // that runs off the page.
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-2.5">
         {metrics.gpus.map((gpu) => (
           <GpuCard key={gpu.index} gpu={gpu} />
         ))}

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { HardDrive, Info, Loader2, MonitorPlay } from "lucide-react";
+import { Info, Loader2, MonitorPlay } from "lucide-react";
 import { useCurrent } from "@/app/use-current";
 import { PageHeader, PathField } from "@/components/common";
+import { DeviceSelector } from "@/components/device-selector";
 import { LogViewer } from "@/components/log-viewer";
 import { GpuList, modelName, runtimeLabel, runtimeTone } from "@/components/node-status";
 import { RuntimeControls } from "@/components/runtime-controls";
@@ -241,38 +242,11 @@ export function RuntimePage() {
             <CardTitle>{t("runtime.device")}</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-3.5">
-            <Field label="visible_devices" hint={t("runtime.deviceHint")}>
-              <div className="grid gap-2">
-                <Select
-                  value={devices.mode}
-                  onChange={(event) => {
-                    const mode = event.target.value as DeviceSelection["mode"];
-                    if (mode === "explicit")
-                      setDevices({
-                        mode: "explicit",
-                        value:
-                          devices.mode === "explicit" ? devices.value : "0",
-                      });
-                    else setDevices({ mode } as DeviceSelection);
-                  }}
-                >
-                  <option value="inherit">{t("runtime.deviceInherit")}</option>
-                  <option value="none">{t("runtime.deviceNone")}</option>
-                  <option value="explicit">
-                    {t("runtime.deviceExplicit")}
-                  </option>
-                </Select>
-                {devices.mode === "explicit" && (
-                  <MonoInput
-                    value={devices.value}
-                    placeholder="0,1"
-                    onChange={(event) =>
-                      setDevices({ mode: "explicit", value: event.target.value })
-                    }
-                  />
-                )}
-              </div>
-            </Field>
+            <DeviceSelector
+              label="visible_devices"
+              selection={devices}
+              onChange={setDevices}
+            />
 
             <div className="grid grid-cols-2 gap-3">
               <Field label={t("runtime.port")}>
@@ -360,10 +334,6 @@ export function RuntimePage() {
           </CardContent>
         </Card>
       </div>
-
-      <Notice tone="info" className="mt-3.5" icon={<HardDrive className="size-3.5" />}>
-        {t("runtime.startHint")}
-      </Notice>
 
       <LogViewer
         className="mt-3.5"

@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -62,6 +63,40 @@ func (l *launcher) resolveVisibleDevices(reqVisible *string) resolvedDevices {
 		return resolvedDevices{spec: spec, explicit: true, auto: true}
 	}
 	return resolvedDevices{}
+}
+
+// validateDeviceRequest enforces the --card pin (§5.8): the flag is a hard
+// restriction on this launcher, not a default a request body may override.
+// A request that names a different spec — including "" ("inject nothing"),
+// which would let the driver fall back to device 0 — is refused before any
+// process is stopped or spawned.
+func (l *launcher) validateDeviceRequest(reqVisible *string) error {
+	if l.card == "" || reqVisible == nil {
+		return nil
+	}
+	card := strings.TrimSpace(l.card)
+	req := strings.TrimSpace(*reqVisible)
+	if req == card {
+		return nil
+	}
+	// A different spelling of the same card set ("1,0" vs "0,1") stays
+	// inside the pin; unparseable specs (UUIDs, MIG) never match.
+	if cs, rs := parseDeviceSet(card), parseDeviceSet(req); cs != nil && rs != nil && sameDeviceSet(cs, rs) {
+		return nil
+	}
+	return fmt.Errorf("this launcher is pinned to GPU %q by --card; loading on %q is refused", card, req)
+}
+
+func sameDeviceSet(a, b map[int]bool) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for d := range a {
+		if !b[d] {
+			return false
+		}
+	}
+	return true
 }
 
 // sampleFreestDevice asks NVML for per-card free VRAM and returns the index

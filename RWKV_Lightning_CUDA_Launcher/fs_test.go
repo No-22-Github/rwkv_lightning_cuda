@@ -55,6 +55,10 @@ func TestFSWhitelistBasics(t *testing.T) {
 	if len(roots) == 0 {
 		t.Fatalf("roots empty: %s", raw)
 	}
+	// The WebUI picker opens here when the form field is still empty.
+	if out["default"] != appDir() {
+		t.Fatalf("default browse dir: %v", out["default"])
+	}
 
 	code, out, raw = fsCall(t, l, fmt.Sprintf(`{"path":%q}`, modelDir))
 	if code != 200 {
@@ -154,10 +158,15 @@ func TestFSOutsideWhitelist(t *testing.T) {
 		}
 	}
 
-	// A file inside the whitelist is not a directory.
-	code, _, _ = fsCall(t, l, fmt.Sprintf(`{"path":%q}`, filepath.Join(modelDir, "model.pth")))
-	if code != 400 {
-		t.Fatalf("file list: %d", code)
+	// A file inside the whitelist lists its containing directory: the browser
+	// opens straight into the folder when seeded with a model path. (A file
+	// outside the whitelist is covered by /etc/passwd above: still 403.)
+	code, out, raw = fsCall(t, l, fmt.Sprintf(`{"path":%q}`, filepath.Join(modelDir, "model.pth")))
+	if code != 200 {
+		t.Fatalf("file list: %d %s", code, raw)
+	}
+	if out["path"] != modelDir {
+		t.Fatalf("file path must resolve to its parent listing: %v", out["path"])
 	}
 }
 

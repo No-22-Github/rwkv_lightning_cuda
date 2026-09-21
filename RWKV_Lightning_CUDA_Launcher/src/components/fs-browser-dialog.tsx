@@ -12,7 +12,12 @@ import { Input } from "@/components/ui/input";
 import { Notice } from "@/components/ui/primitives";
 import { ApiError } from "@/lib/api/http";
 import { nodeApi } from "@/lib/api/node";
-import { isFsRoots, type FsDirectory, type FsEntry } from "@/lib/api/types";
+import {
+  isFsRoots,
+  type FsDirectory,
+  type FsEntry,
+  type FsResponse,
+} from "@/lib/api/types";
 import { formatBytes } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
 import { useBackends } from "@/stores/backends";
@@ -34,8 +39,8 @@ export function FsBrowserDialog() {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(
-    async (target?: string) => {
-      if (!backendId) return;
+    async (target?: string): Promise<FsResponse | null> => {
+      if (!backendId) return null;
       setBusy(true);
       setError("");
       try {
@@ -49,6 +54,7 @@ export function FsBrowserDialog() {
           setPath(response.path);
           setInput(response.path);
         }
+        return response;
       } catch (caught) {
         // Out-of-whitelist and missing paths both answer 403 without echoing
         // the path, so the message must stay generic.
@@ -59,6 +65,7 @@ export function FsBrowserDialog() {
               ? caught.message
               : String(caught),
         );
+        return null;
       } finally {
         setBusy(false);
       }
@@ -69,7 +76,16 @@ export function FsBrowserDialog() {
   useEffect(() => {
     if (!pick) return;
     setInput(initialPath);
-    void load(initialPath || undefined);
+    void (async () => {
+      const response = await load(initialPath || undefined);
+      // An empty form field opens straight into the Agent's default
+      // directory (the launcher binary's folder) instead of dead-ending on
+      // the whitelist-roots list; the up button leads back to that list.
+      if (!initialPath && response && isFsRoots(response) && response.default) {
+        setInput(response.default);
+        await load(response.default);
+      }
+    })();
   }, [pick, initialPath, load]);
 
   const choose = (entry?: FsEntry) => {
@@ -102,11 +118,11 @@ export function FsBrowserDialog() {
           >
             {t("common.refresh")}
           </Button>
-          {listing && listing.parent && (
+          {listing && (
             <Button
               disabled={busy}
-              title={t("fs.up")}
-              onClick={() => void load(listing.parent)}
+              title={listing.parent ? t("fs.up") : t("fs.roots")}
+              onClick={() => void load(listing.parent || undefined)}
             >
               <ArrowUp className="size-3.5" />
             </Button>

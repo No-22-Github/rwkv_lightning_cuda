@@ -405,6 +405,9 @@ func (l *launcher) status() map[string]any {
 	out["translation_adapter"] = true
 	out["available"] = l.agentCapable()
 	out["visible_devices"] = devices.spec
+	// The --card pin, so clients can lock their device pickers to it; empty
+	// when the launcher was started without --card (§5.8).
+	out["card"] = l.card
 	// A runtime the Agent did not spawn itself (started by hand or by another
 	// launcher) used to read as "offline" forever: the /v1/server/status probe
 	// only ran for managed processes. Probe the configured port regardless, so
@@ -546,6 +549,9 @@ func (l *launcher) runtimeArgs(req startRequest, devices resolvedDevices) ([]str
 	return args, nil
 }
 func (l *launcher) start(req startRequest) error {
+	if err := l.validateDeviceRequest(req.VisibleDevices); err != nil {
+		return err
+	}
 	devices := l.resolveVisibleDevices(req.VisibleDevices)
 	// §5.8(a): the global runtime/tuning exclusion is per-card now — only
 	// processes whose resolved devices overlap are blocked.
@@ -606,6 +612,11 @@ func (l *launcher) runtimeLoad(req runtimeLoadRequest) (map[string]any, error) {
 		cfg.VisibleDevices = &spec
 	} else {
 		cfg.VisibleDevices = nil // no card chosen: §5.8 chain, auto placement included
+	}
+	// Refuse a pin violation before stopping the current runtime: a failed
+	// start after the stop would leave the node with nothing serving.
+	if err := l.validateDeviceRequest(cfg.VisibleDevices); err != nil {
+		return nil, err
 	}
 
 	l.mu.Lock()

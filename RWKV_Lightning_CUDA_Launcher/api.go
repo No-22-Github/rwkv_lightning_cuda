@@ -424,6 +424,9 @@ func (l *launcher) handleTuningStart(w http.ResponseWriter, r *http.Request) err
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if e := l.validateDeviceRequest(req.VisibleDevices); e != nil {
+		return e
+	}
 	devices := l.resolveVisibleDevices(req.VisibleDevices)
 	if l.runtime.active() && devicesOverlap(devices, l.runtimeDevices) {
 		return fmt.Errorf("inference is using the GPU; stop inference before starting tuning")
@@ -479,6 +482,9 @@ func (l *launcher) handleQuantizationStart(w http.ResponseWriter, r *http.Reques
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if e := l.validateDeviceRequest(req.VisibleDevices); e != nil {
+		return e
+	}
 	devices := l.resolveVisibleDevices(req.VisibleDevices)
 	if e = l.quantization.launch(exe, args, "", devices.spec); e != nil {
 		return e

@@ -95,6 +95,12 @@ export interface RuntimeState extends ProcessStatus {
   translation_adapter: boolean;
   available: boolean;
   visible_devices: string;
+  /**
+   * The Agent's `--card` pin, empty when unpinned. A hard restriction, not a
+   * default: the Agent refuses to start anything outside this spec, so
+   * device pickers must lock to it.
+   */
+  card?: string;
   backend?: Record<string, unknown>;
   /**
    * False when the ready runtime was started outside this launcher (the
@@ -137,6 +143,8 @@ export interface FsEntry {
 
 export interface FsRoots {
   roots: string[];
+  /** Where the browser should open when the form field is empty: appDir. */
+  default?: string;
 }
 
 export interface FsDirectory {

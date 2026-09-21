@@ -107,6 +107,49 @@ func TestResolveVisibleDevices(t *testing.T) {
 	}
 }
 
+// The --card flag is a hard pin: an explicit request outside it — including
+// the empty "inject nothing" spec — must be refused, while a silent request
+// keeps falling through to the pinned card.
+func TestValidateDeviceRequest(t *testing.T) {
+	l := newLauncher()
+	if err := l.validateDeviceRequest(nil); err != nil {
+		t.Fatalf("unpinned launcher accepts anything: %v", err)
+	}
+	spec := "1"
+	if err := l.validateDeviceRequest(&spec); err != nil {
+		t.Fatalf("unpinned launcher accepts explicit specs: %v", err)
+	}
+	l.card = "1"
+	same := "1"
+	if err := l.validateDeviceRequest(&same); err != nil {
+		t.Fatalf("the pinned spec itself is allowed: %v", err)
+	}
+	reordered := " 1 "
+	if err := l.validateDeviceRequest(&reordered); err != nil {
+		t.Fatalf("same card, different spelling is allowed: %v", err)
+	}
+	if err := l.validateDeviceRequest(nil); err != nil {
+		t.Fatalf("silent request falls through to --card: %v", err)
+	}
+	for _, bad := range []string{"0", "2", "", "0,1", "GPU-uuid"} {
+		spec := bad
+		if err := l.validateDeviceRequest(&spec); err == nil {
+			t.Fatalf("pinned launcher must refuse %q", bad)
+		} else if !strings.Contains(err.Error(), `"1"`) {
+			t.Fatalf("refusal must name the pinned card: %v", err)
+		}
+	}
+	l.card = "0,1"
+	multi := "1,0"
+	if err := l.validateDeviceRequest(&multi); err != nil {
+		t.Fatalf("same set in another order stays inside the pin: %v", err)
+	}
+	outside := "2"
+	if err := l.validateDeviceRequest(&outside); err == nil {
+		t.Fatalf("multi-card pin must still refuse outside cards")
+	}
+}
+
 func TestPickFreestDevice(t *testing.T) {
 	if got := pickFreestDevice(nil); got != "" {
 		t.Fatalf("empty GPU list: %q", got)

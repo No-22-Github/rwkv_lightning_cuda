@@ -47,11 +47,17 @@ export function ModelLoader() {
 
   const gpus = metrics?.available ? metrics.gpus : [];
   const current = runtime?.visible_devices;
+  // A launcher pinned by --card refuses every other spec, so the picker only
+  // offers the pinned card next to auto.
+  const pinned = runtime?.card?.trim() ?? "";
+  const cardValue = pinned && card !== "" && card !== pinned ? "" : card;
 
   const submit = async () => {
     if (!backendId) return;
     try {
-      const out = await useNodes.getState().loadOnCard(backendId, model, card);
+      const out = await useNodes
+        .getState()
+        .loadOnCard(backendId, model, cardValue);
       toast.success(
         t("chat.loadDone", {
           card: out?.visible_devices || t("chat.autoCard"),
@@ -85,13 +91,19 @@ export function ModelLoader() {
         </Field>
       )}
       <Field label={t("chat.loadCard")}>
-        <Select value={card} onChange={(e) => setCard(e.target.value)}>
+        <Select value={cardValue} onChange={(e) => setCard(e.target.value)}>
           <option value="">{t("chat.autoCard")}</option>
-          {gpus.map((gpu) => (
-            <option key={gpu.index} value={String(gpu.index)}>
-              GPU {gpu.index} · {t("chat.gpuFree", { free: gigabytesFree(gpu) })}
+          {pinned ? (
+            <option value={pinned}>
+              GPU {pinned} · {t("runtime.devicePinned")}
             </option>
-          ))}
+          ) : (
+            gpus.map((gpu) => (
+              <option key={gpu.index} value={String(gpu.index)}>
+                GPU {gpu.index} · {t("chat.gpuFree", { free: gigabytesFree(gpu) })}
+              </option>
+            ))
+          )}
         </Select>
       </Field>
       <Button disabled={busy} onClick={() => void submit()}>
@@ -105,6 +117,7 @@ export function ModelLoader() {
       <p className="text-[11px] leading-snug text-muted-foreground">
         {t("chat.loadHint")}
         {current ? ` ${t("chat.loadCurrent")} GPU ${current}.` : ""}
+        {pinned ? ` ${t("runtime.devicePinnedHint", { card: pinned })}` : ""}
       </p>
     </div>
   );

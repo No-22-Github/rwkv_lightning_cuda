@@ -139,13 +139,15 @@ Runtime / Tuning / Quantization 请求体集中定义在 `request_types.go`，�
   "version": "1.7.5",
   "capabilities": ["runtime", "tuning_state", "tuning_miss", "quantization", "metrics", "fs", "host_dialog"],
   "available": true,
-  "visible_devices": ""
+  "visible_devices": "",
+  "card": "0"
 }
 ```
 
 - `config.password` 永远是空串（不回显密码，历史行为不变）。
 - `available`：本机是否存在 runtime 二进制（Client 形态为 false）。
 - `visible_devices`：当前 runtime 进程被钉住的原始选卡串（§选卡），未注入时为 `""`。
+- `card`：Agent 启动参数 `--card` 的原值，未指定时为 `""`。它是硬性钉定而不是默认值：显式指定其他选卡（包括空串「不注入」）的启动/加载请求会被 400 拒绝（§选卡）。
 - `version` 来自构建时的 `-ldflags "-X main.launcherVersion=…"`；本地构建为 `dev`。
 
 Client 形态下 `/api/v1/node` 返回 404（`{"error":"client_only", …}`），避免探测者把 Client 误判为 Agent；旧 `/api/status` 仍返回 200 + `role:"client"` 标记，保证老 WebUI 可渲染。
@@ -218,6 +220,13 @@ Client 形态下 `/api/v1/node` 返回 404（`{"error":"client_only", …}`）�
    子进程日志。采样不可用时退回旧行为：不注入（子进程看见全部卡，驱动落 device 0）。
    自动放置按「空闲显存最大」而非「占用率最低」——一张 48G 卡用掉 20% 仍优于一张空的 24G 卡。
 
+**`--card` 是硬性钉定，不是默认值**：Agent 以 `--card <spec>` 启动时，任何显式指定其他选卡的
+请求——包括空串「显式不注入」——都会被 400 拒绝（`this launcher is pinned to GPU "…" by --card;
+loading on "…" is refused`），runtime/tuning/quantization/`runtime/load` 四条路径一致。与钉定串
+同集合的写法（如 `1,0` vs `0,1`）放行；请求缺省 `visible_devices` 时照常落到 `--card`。
+`/api/v1/node` 的 `card` 字段回显钉定串，前端据此把选卡控件锁到该卡。`runtime/load` 在
+**停止当前 runtime 之前**先做该校验，避免校验失败把已在服务的节点摘掉。
+
 注入方式：spawn 子进程时改写环境变量——NVIDIA 设 `CUDA_VISIBLE_DEVICES`；AMD 设 `HIP_VISIBLE_DEVICES` + `ROCR_VISIBLE_DEVICES`（厂商判断复用 metrics 的 vendor）。三个设备变量先全部移除再注入，避免继承值与注入值叠加。
 
 连带行为：
@@ -240,7 +249,9 @@ Client 形态下 `/api/v1/node` 返回 404（`{"error":"client_only", …}`）�
 { "path": "/data/models", "parent": "", "entries": [ { "name": "g1i-7b.pth", "is_dir": false, "size": 14700000000 } ] }
 ```
 
-- 白名单 = `appDir()` + 注册表式的「本 launcher 实际用过的目录」（runtime/tuning/quantization 配置引用过的目录在成功启动/校验时记录，持久化在 `<appDir>/launcher_fs_roots.json`，上限 64 条）。
+- 白名单 = `appDir()` + 用户主目录（`~`，模型目录常在 `~/models` 一类位置）+ 注册表式的「本 launcher 实际用过的目录」（runtime/tuning/quantization 配置引用过的目录在成功启动/校验时记录，持久化在 `<appDir>/launcher_fs_roots.json`，上限 64 条）。
+- 根列表响应额外带 `"default"`：WebUI 浏览器在表单为空时默认展开的目录（`appDir()`，退化到主目录）。
+- 请求 path 指向白名单内的**文件**（如从表单带进来的模型路径）时，返回其所在目录的列表（`path` 为父目录）；白名单外的文件仍是 403。
 - 越界（含 `..` 穿越清洗后落在白名单外、指向白名单外的符号链接）返回 403，**响应体不回显被拒绝的路径**；不存在的路径同样 403，避免构成文件存在性 oracle。
 - 目录内指向白名单外的符号链接仍会列出名字（它确实在该目录里），但不显示类型/大小等目标元信息。
 - `parent` 为空串表示当前已在白名单根（无法再向上）。
@@ -441,8 +452,8 @@ type RuntimeState = ProcessStatus & {
 | `POST /api/v1/backends` | `{"name":"...","base_url":"http://host:18766","token":"..."}` | 单个 BackendView，HTTP 200 |
 | `DELETE /api/v1/backends/{id}` | 无 | `{"ok":true}` |
 | `POST /api/v1/backends/{id}/probe` | 无 | 单个 BackendView，HTTP 200 |
-| `POST /api/v1/node/fs` | `{}` 或 `{"path":""}` | `{"roots":["/data",...]}` |
-| `POST /api/v1/node/fs` | `{"path":"/data"}` | `{"path":"/data","parent":"","entries":[...]}` |
+| `POST /api/v1/node/fs` | `{}` 或 `{"path":""}` | `{"roots":["/data",...],"default":"/app/dir"}` |
+| `POST /api/v1/node/fs` | `{"path":"/data"}` | `{"path":"/data","parent":"","entries":[...]}`；path 为白名单内文件时返回其父目录 |
 | `POST /api/v1/node/dialog/file` / `directory` | 无 | `{"path":"..."}`；取消时可能为空串 |
 | `POST /api/v1/node/dialog/reveal` | 无 | `{"ok":true}`，打开最近 checkpoint 所在目录，不接受任意 path |
 

@@ -125,6 +125,12 @@ func (l *launcher) allFSRoots() []string {
 		}
 	}
 	add(appDir(), true)
+	// The user's home is browsable by design: model trees routinely live under
+	// ~/models, and the WebUI picker should be able to start from ~ (still
+	// token-gated; §5.5 applies to the whole whitelist).
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		add(home, true)
+	}
 	add(rc.ModelPath, rc.EnableDynamicLoading)
 	add(rc.VocabPath, false)
 	add(rc.StateDBPath, false)
@@ -196,6 +202,19 @@ func (l *launcher) resolveFS(path string) (clean string, parent string, err erro
 
 var errFSOutside = errors.New("path is outside the browsable roots")
 
+// defaultBrowseDir is where the WebUI directory browser opens when the form
+// field is still empty: the launcher binary's own folder (models usually sit
+// next to it), falling back to the user's home.
+func defaultBrowseDir() string {
+	if st, err := os.Stat(appDir()); err == nil && st.IsDir() {
+		return appDir()
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return home
+	}
+	return ""
+}
+
 // recordFSConfigs whitelists the directories referenced by validated
 // configs so remote browsing can walk them on the next request. Files
 // contribute their parent directory; directory fields contribute
@@ -254,7 +273,7 @@ func (l *launcher) handleNodeFS(w http.ResponseWriter, r *http.Request) error {
 				roots = append(roots, root)
 			}
 		}
-		writeJSON(w, 200, map[string]any{"roots": roots})
+		writeJSON(w, 200, map[string]any{"roots": roots, "default": defaultBrowseDir()})
 		return nil
 	}
 	clean, parent, err := l.resolveFS(*req.Path)
@@ -265,8 +284,17 @@ func (l *launcher) handleNodeFS(w http.ResponseWriter, r *http.Request) error {
 		}
 		return err
 	}
-	if st, serr := os.Stat(clean); serr != nil || !st.IsDir() {
+	if st, serr := os.Stat(clean); serr != nil {
 		return errors.New("path is not a directory")
+	} else if !st.IsDir() {
+		// A file path (a model .pth seeded from the form) lists its containing
+		// directory: the browser only ever shows directories, and the file's
+		// directory is whitelisted whenever the file itself resolved.
+		clean, parent, err = l.resolveFS(filepath.Dir(clean))
+		if err != nil {
+			writeJSON(w, 403, map[string]any{"error": "forbidden"})
+			return nil
+		}
 	}
 	entries, err := os.ReadDir(clean)
 	if err != nil {

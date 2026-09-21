@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Play, Square, TriangleAlert } from "lucide-react";
 import { useCurrent } from "@/app/use-current";
 import { CopyButton, PageHeader, PathField } from "@/components/common";
+import { DeviceSelector } from "@/components/device-selector";
 import { LogViewer } from "@/components/log-viewer";
 import { StatusDot } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,51 +34,6 @@ import { useNodeBusy, useNodes } from "@/stores/nodes";
 import { toast } from "@/stores/ui";
 
 const LOG_ENDPOINT = "/api/v1/jobs/quantization/logs";
-
-/** `{mode}` is a three-state union: never collapse it into one string. */
-function DeviceField({
-  label,
-  selection,
-  onChange,
-  className,
-}: {
-  label: string;
-  selection: DeviceSelection;
-  onChange: (selection: DeviceSelection) => void;
-  className?: string;
-}) {
-  const { t } = useI18n();
-  const current = selection.mode === "explicit" ? selection.value : "";
-  return (
-    <Field label={label} hint={t("runtime.deviceHint")} className={className}>
-      <div className="grid gap-2">
-        <Select
-          value={selection.mode}
-          onChange={(event) => {
-            const mode = event.target.value;
-            if (mode === "explicit") onChange({ mode: "explicit", value: current });
-            else if (mode === "none") onChange({ mode: "none" });
-            else onChange({ mode: "inherit" });
-          }}
-        >
-          <option value="inherit">{t("runtime.deviceInherit")}</option>
-          <option value="none">{t("runtime.deviceNone")}</option>
-          <option value="explicit">{t("runtime.deviceExplicit")}</option>
-        </Select>
-        {selection.mode === "explicit" && (
-          <Input
-            value={selection.value}
-            placeholder="0"
-            onChange={(event) =>
-              onChange({ mode: "explicit", value: event.target.value })
-            }
-            className="font-mono text-xs"
-          />
-        )}
-      </div>
-    </Field>
-  );
-}
 
 export function QuantizationPage() {
   const { t } = useI18n();
@@ -225,7 +181,7 @@ export function QuantizationPage() {
             </Field>
           </div>
 
-          <DeviceField
+          <DeviceSelector
             label={t("quant.visibleDevices")}
             selection={devices}
             onChange={setDevices}

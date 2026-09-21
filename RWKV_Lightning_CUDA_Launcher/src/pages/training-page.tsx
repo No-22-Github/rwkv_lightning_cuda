@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, Play, Square, TriangleAlert } from "lucide-react";
 import { useCurrent } from "@/app/use-current";
 import { CopyButton, PageHeader, PathField } from "@/components/common";
+import { DeviceSelector } from "@/components/device-selector";
 import { LogViewer } from "@/components/log-viewer";
 import { StatusDot } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -39,51 +40,6 @@ const LOG_ENDPOINT = "/api/v1/jobs/tuning/logs";
 /** MiSS is adam-only; `state` keeps whatever the user picked. */
 function effectiveOptimizer(config: TuningConfig): TuningConfig["optimizer"] {
   return config.method === "miss" ? "adam" : config.optimizer;
-}
-
-/** `{mode}` is a three-state union: never collapse it into one string. */
-function DeviceField({
-  label,
-  selection,
-  onChange,
-  className,
-}: {
-  label: string;
-  selection: DeviceSelection;
-  onChange: (selection: DeviceSelection) => void;
-  className?: string;
-}) {
-  const { t } = useI18n();
-  const current = selection.mode === "explicit" ? selection.value : "";
-  return (
-    <Field label={label} hint={t("runtime.deviceHint")} className={className}>
-      <div className="grid gap-2">
-        <Select
-          value={selection.mode}
-          onChange={(event) => {
-            const mode = event.target.value;
-            if (mode === "explicit") onChange({ mode: "explicit", value: current });
-            else if (mode === "none") onChange({ mode: "none" });
-            else onChange({ mode: "inherit" });
-          }}
-        >
-          <option value="inherit">{t("runtime.deviceInherit")}</option>
-          <option value="none">{t("runtime.deviceNone")}</option>
-          <option value="explicit">{t("runtime.deviceExplicit")}</option>
-        </Select>
-        {selection.mode === "explicit" && (
-          <Input
-            value={selection.value}
-            placeholder="0"
-            onChange={(event) =>
-              onChange({ mode: "explicit", value: event.target.value })
-            }
-            className="font-mono text-xs"
-          />
-        )}
-      </div>
-    </Field>
-  );
 }
 
 /** One of the 01–04 pipeline cards: glyph + step name + live value. */
@@ -496,7 +452,7 @@ export function TrainingPage() {
                     <option value="muon">muon</option>
                   </Select>
                 </Field>
-                <DeviceField
+                <DeviceSelector
                   label={t("runtime.deviceMode")}
                   selection={devices}
                   onChange={setDevices}
