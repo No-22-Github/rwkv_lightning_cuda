@@ -253,3 +253,19 @@ export interface ModelListResponse {
   available?: string[];
   loaded?: string | null;
 }
+
+/**
+ * `POST /api/v1/runtime/load`: put the runtime (dynamic mode: also a model)
+ * onto a card by restarting with `CUDA_VISIBLE_DEVICES` injected. Inherently
+ * interrupting — CUDA binds devices at process init.
+ */
+export interface RuntimeLoadRequest {
+  model?: string;
+  visible_devices?: string;
+}
+
+export interface RuntimeLoadResponse {
+  ok: boolean;
+  visible_devices?: string;
+  model?: string;
+}

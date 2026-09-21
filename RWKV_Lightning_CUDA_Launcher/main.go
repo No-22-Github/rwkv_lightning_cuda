@@ -6,6 +6,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -577,6 +578,106 @@ func (l *launcher) start(req startRequest) error {
 	l.recordFSConfigs(req, l.tuningConfig, l.quantizationConfig)
 	return nil
 }
+
+// runtimeLoadRequest is POST /api/v1/runtime/load: put the runtime (and, in
+// dynamic-loading mode, a model) onto a chosen card. Restart-based by design
+// — CUDA binds devices to the process at init — so a card switch inherently
+// interrupts active inference; the request contract says so.
+type runtimeLoadRequest struct {
+	Model          string `json:"model"`
+	VisibleDevices string `json:"visible_devices"`
+}
+
+const runtimeLoadReadyTimeout = 10 * time.Minute
+
+// runtimeLoad switches the managed runtime onto a card using the saved
+// config: stop → start with the card injected as CUDA_VISIBLE_DEVICES →
+// wait for readiness → (dynamic mode) POST /v1/model/load. It runs with the
+// saved config because that carries the real runtime password, which the
+// WebUI never sees (status() blanks it on the wire).
+func (l *launcher) runtimeLoad(req runtimeLoadRequest) (map[string]any, error) {
+	l.mu.Lock()
+	cfg := l.config
+	l.mu.Unlock()
+	if cfg.ModelPath == "" {
+		return nil, errors.New("no saved runtime config: start the runtime once from the Runtime page first")
+	}
+	if spec := strings.TrimSpace(req.VisibleDevices); spec != "" {
+		cfg.VisibleDevices = &spec
+	} else {
+		cfg.VisibleDevices = nil // no card chosen: §5.8 chain, auto placement included
+	}
+
+	l.mu.Lock()
+	if l.runtime.active() {
+		if e := l.runtime.stop(); e != nil {
+			l.mu.Unlock()
+			return nil, fmt.Errorf("stopping the current runtime failed: %w", e)
+		}
+	}
+	e := l.start(cfg)
+	l.mu.Unlock()
+	if e != nil {
+		l.runtime.appendLog("card switch failed: " + e.Error())
+		return nil, e
+	}
+	l.mu.Lock()
+	spec := l.runtimeDevices.spec
+	l.mu.Unlock()
+
+	// Readiness is what status() reports: the native server answering
+	// /v1/server/status. Non-dynamic cold loads of multi-GB models live
+	// inside this window, hence the generous cap.
+	deadline := time.Now().Add(runtimeLoadReadyTimeout)
+	for {
+		state, _ := l.status()["status"].(string)
+		if state == "ready" {
+			break
+		}
+		if state == "error" {
+			return nil, errors.New("runtime failed to start on the requested card; see the runtime log")
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("runtime did not become ready within %s", runtimeLoadReadyTimeout)
+		}
+		time.Sleep(800 * time.Millisecond)
+	}
+
+	loaded := ""
+	target := strings.TrimSpace(req.Model)
+	if cfg.EnableDynamicLoading && target != "" {
+		client := http.Client{Timeout: 15 * time.Minute}
+		body, err := json.Marshal(map[string]string{"model": target})
+		if err != nil {
+			return nil, err
+		}
+		httpReq, err := http.NewRequest("POST",
+			"http://127.0.0.1:"+cfg.Port+"/v1/model/load", bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		if cfg.Password != "" {
+			httpReq.Header.Set("Authorization", "Bearer "+cfg.Password)
+		}
+		resp, err := client.Do(httpReq)
+		if err != nil {
+			return nil, fmt.Errorf("model load request failed: %w", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			return nil, fmt.Errorf("model load failed: HTTP %d: %s",
+				resp.StatusCode, strings.TrimSpace(string(snippet)))
+		}
+		loaded = target
+		l.runtime.appendLog("model " + target + " loaded on GPU " + spec)
+	} else if spec != "" {
+		l.runtime.appendLog("runtime restarted on GPU " + spec)
+	}
+	return map[string]any{"ok": true, "visible_devices": spec, "model": loaded}, nil
+}
+
 func validateDataset(path string) (int, error) {
 	if err := existingPath(path, false); err != nil {
 		return 0, err

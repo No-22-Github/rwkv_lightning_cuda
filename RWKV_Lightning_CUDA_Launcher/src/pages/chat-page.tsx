@@ -1,13 +1,14 @@
 import "highlight.js/styles/github-dark-dimmed.css";
 import { useEffect, useRef } from "react";
 import { MessageSquare, Plus } from "lucide-react";
+import { ModelLoader } from "@/components/chat/model-loader";
 import { useCurrent } from "@/app/use-current";
 import { Composer } from "@/components/chat/composer";
 import { GenerationPanel } from "@/components/chat/generation-panel";
 import { MessageBubble } from "@/components/chat/message-bubble";
 import { modelName } from "@/components/node-status";
 import { Button } from "@/components/ui/button";
-import { EmptyState } from "@/components/ui/primitives";
+import { EmptyState, Separator } from "@/components/ui/primitives";
 import { useI18n } from "@/lib/i18n";
 import { useChat, useStreaming, useThread } from "@/stores/chat";
 
@@ -102,6 +103,8 @@ export function ChatPage() {
       </div>
 
       <aside className="overflow-auto border-l border-border bg-card p-4">
+        <ModelLoader />
+        <Separator className="my-3.5" />
         <GenerationPanel backendId={backendId} />
       </aside>
     </div>

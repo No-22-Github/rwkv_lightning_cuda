@@ -66,6 +66,7 @@ Runtime / Tuning / Quantization 请求体集中定义在 `request_types.go`，�
 | POST | `/api/v1/runtime/start` | 启动，body = RuntimeConfig | `/api/start` |
 | POST | `/api/v1/runtime/stop` | 停止 | `/api/stop` |
 | POST | `/api/v1/runtime/restart` | 用实际运行配置重启 | `/api/restart` |
+| POST | `/api/v1/runtime/load` | 选卡（重）加载：停止 → 以 `visible_devices` 重启 → 等就绪 →（动态模式）加载模型 | — |
 | GET | `/api/v1/runtime/logs` | SSE 日志流 | `/logs` |
 
 ### 任务（Agent）
@@ -273,6 +274,17 @@ Client 形态下 `/api/v1/node` 返回 404（`{"error":"client_only", …}`）�
 ### RuntimeConfig
 
 用于 `POST /api/v1/runtime/start`。start 在上次保存的配置上解码，因此省略字段会保留已有值（包括曾显式指定的 `visible_devices`）；首次启动的默认值不应被当成每次请求都会重新应用。restart 使用已保存配置，不使用请求体里的新表单。
+
+#### `POST /api/v1/runtime/load`
+
+body：`{ "model": "<动态模式模型 ID，可省略>", "visible_devices": "<选卡串，可省略>" }`。
+用**保存的配置**（含真实 runtime 密码，WebUI 永远看不到）执行：停止当前 runtime →
+按 §选卡 优先级链解析设备（请求体给了 `visible_devices` 就用它；缺省走自动选卡）→
+重启 → 轮询 `/v1/server/status` 直到 ready（上限 10 分钟，覆盖非动态模式的多 GB 冷加载）→
+动态模式下若给了 `model` 则带认证调用 `/v1/model/load`（15 分钟上限）。响应
+`{ "ok": true, "visible_devices": "<实际钉定串>", "model": "<已加载模型或空串>" }`。
+选卡串写入保存的配置，之后的 restart 沿用该卡。CUDA 在进程初始化时绑定设备，因此换卡
+必然中断活跃推理——这是接口契约，不是缺陷。前端入口：Chat 页右栏「模型与显卡」。
 
 | 字段 | JSON 类型 | 含义 / 校验 |
 | --- | --- | --- |

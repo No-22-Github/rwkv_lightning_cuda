@@ -12,6 +12,7 @@ import type {
   NodeInfo,
   QuantizationConfig,
   RuntimeConfig,
+  RuntimeLoadResponse,
   RuntimeState,
   TuningConfig,
 } from "@/lib/api/types";
@@ -59,6 +60,12 @@ interface NodesState {
   stopJob: (id: string, job: JobID) => Promise<void>;
   validateDataset: (id: string, path: string) => Promise<number>;
   loadModel: (id: string, model: string) => Promise<void>;
+  /** Card-switch load: restart on the card, then (dynamic) load the model. */
+  loadOnCard: (
+    id: string,
+    model: string,
+    devices: string,
+  ) => Promise<RuntimeLoadResponse | undefined>;
 }
 
 const patch = (
@@ -207,6 +214,22 @@ export const useNodes = create<NodesState>((set, get) => ({
     try {
       await inferenceApi.loadModel(id, model);
       await get().refresh(id);
+    } finally {
+      set((s) => ({ busy: { ...s.busy, [id]: false } }));
+    }
+  },
+
+  // The agent-side call blocks until the restarted runtime is ready (and a
+  // dynamic model has loaded), so this can legitimately take minutes.
+  loadOnCard: async (id, model, devices) => {
+    set((s) => ({ busy: { ...s.busy, [id]: true } }));
+    try {
+      const out = await runtimeApi.load(id, {
+        model: model || undefined,
+        visible_devices: devices || undefined,
+      });
+      await get().refresh(id);
+      return out;
     } finally {
       set((s) => ({ busy: { ...s.busy, [id]: false } }));
     }

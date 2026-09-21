@@ -205,6 +205,15 @@ const zh = {
   "chat.emptyTitle": "开始一段新对话",
   "chat.emptyBody":
     "消息会发送到当前节点的 /v1/chat/completions，由服务端套用聊天模板。",
+  "chat.modelLoader": "模型与显卡",
+  "chat.loadCard": "加载到哪张卡",
+  "chat.autoCard": "自动 · 空闲显存最大",
+  "chat.gpuFree": "空闲 {free}G",
+  "chat.loadOnCard": "加载（换卡会重启 runtime）",
+  "chat.loadDone": "已在 GPU {card} 上就绪",
+  "chat.loadHint":
+    "加载会先停止当前 runtime，再以环境变量钉定所选显卡重启，活跃推理会中断。",
+  "chat.loadCurrent": "当前所在卡：",
   "chat.you": "你",
   "chat.assistant": "助手",
   "chat.stopped": "已停止生成。",
@@ -608,6 +617,15 @@ const en: Record<MessageKey, string> = {
   "chat.emptyTitle": "Start a new conversation",
   "chat.emptyBody":
     "Messages go to the current node's /v1/chat/completions; the server applies the chat template.",
+  "chat.modelLoader": "Model & GPU",
+  "chat.loadCard": "Load onto card",
+  "chat.autoCard": "Auto · most free VRAM",
+  "chat.gpuFree": "{free}G free",
+  "chat.loadOnCard": "Load (switching cards restarts the runtime)",
+  "chat.loadDone": "Ready on GPU {card}",
+  "chat.loadHint":
+    "Loading stops the current runtime and restarts it with the chosen card injected as an environment variable; active inference is interrupted.",
+  "chat.loadCurrent": "Currently on:",
   "chat.you": "You",
   "chat.assistant": "Assistant",
   "chat.stopped": "Generation stopped.",

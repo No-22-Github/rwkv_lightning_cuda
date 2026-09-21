@@ -1,5 +1,10 @@
 import { nodeRequest, nodeStream } from "./http";
-import type { RuntimeConfig, RuntimeState } from "./types";
+import type {
+  RuntimeConfig,
+  RuntimeLoadRequest,
+  RuntimeLoadResponse,
+  RuntimeState,
+} from "./types";
 import { SSEParser } from "./sse";
 
 export const runtimeApi = {
@@ -23,6 +28,12 @@ export const runtimeApi = {
       "/api/v1/runtime/restart",
       { body: {} },
     ),
+
+  /** Card-switch load: restart on `visible_devices`, then (dynamic) load. */
+  load: (backendId: string, body: RuntimeLoadRequest) =>
+    nodeRequest<RuntimeLoadResponse>(backendId, "/api/v1/runtime/load", {
+      body,
+    }),
 
   logsUrl: (backendId: string) => `/api/v1/backends/${backendId}/api/v1/runtime/logs`,
 };

@@ -424,3 +424,18 @@ func TestExternalRuntimeIsReportedReady(t *testing.T) {
 		t.Fatalf("dark port reported %v, want offline", out["status"])
 	}
 }
+
+// Card-switch loads need a saved runtime config to restart from: without one
+// the Agent would silently start an empty server, and a --client-only host
+// has no runtime to manage at all.
+func TestRuntimeLoadValidation(t *testing.T) {
+	client := newLauncher()
+	client.clientOnly = true
+	if _, err := client.runtimeLoad(runtimeLoadRequest{Model: "m", VisibleDevices: "1"}); err == nil {
+		t.Fatal("client-only launcher accepted a runtime load")
+	}
+	l := newLauncher()
+	if _, err := l.runtimeLoad(runtimeLoadRequest{VisibleDevices: "1"}); err == nil || !strings.Contains(err.Error(), "no saved runtime config") {
+		t.Fatalf("load without a saved config: %v", err)
+	}
+}

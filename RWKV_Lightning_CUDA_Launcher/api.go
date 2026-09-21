@@ -122,6 +122,21 @@ func (l *launcher) handler() http.Handler {
 	apiV1(mux, "POST /api/v1/runtime/stop", func(w http.ResponseWriter, r *http.Request) error {
 		return l.runtimeAction("stop", w, r)
 	})
+	apiV1(mux, "POST /api/v1/runtime/load", func(w http.ResponseWriter, r *http.Request) error {
+		if !l.agentGate(w) {
+			return nil
+		}
+		var req runtimeLoadRequest
+		if e := decode(w, r, &req); e != nil {
+			return e
+		}
+		out, e := l.runtimeLoad(req)
+		if e != nil {
+			return e
+		}
+		writeJSON(w, 200, out)
+		return nil
+	})
 	apiV1(mux, "POST /api/v1/runtime/restart", func(w http.ResponseWriter, r *http.Request) error {
 		if !l.agentGate(w) {
 			return nil
