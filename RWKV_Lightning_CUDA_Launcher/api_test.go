@@ -222,3 +222,49 @@ func TestDialogUnsupportedForRemoteCallers(t *testing.T) {
 		t.Fatalf("dialog in client form: %d %v", code, body)
 	}
 }
+
+// The old WebUI's own endpoints went with it. The pre-/api/v1 *control*
+// aliases stay: they serve third-party callers and an older Client, whose
+// probe ladder identifies an agent by GET /api/status.
+func TestWebUIOnlyAliasesAreGone(t *testing.T) {
+	for _, path := range []string{backendExecutable(), toolBinary("rwkv_state_tune")} {
+		if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		defer os.Remove(path)
+	}
+	l := newLauncher()
+	h := l.handler()
+
+	// Host dialogs were reachable only from the local page: legacyRoutes
+	// deliberately never forwarded them to a remote agent.
+	for _, path := range []string{"/api/pick-file", "/api/pick-directory", "/api/tuning/open-folder"} {
+		code, body, raw := callJSON(t, h, "POST", "http://127.0.0.1:10721"+path, nil, nil)
+		if code != 404 || body["error"] != "not found" {
+			t.Fatalf("%s should be gone: %d %s", path, code, raw)
+		}
+	}
+	// /logs is replaced by /api/v1/runtime/logs. Nothing serves it now, so it
+	// falls through to the static handler rather than to an SSE stream.
+	r := httptest.NewRequest("GET", "http://127.0.0.1:10721/logs", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if ct := w.Header().Get("Content-Type"); strings.HasPrefix(ct, "text/event-stream") {
+		t.Fatalf("/logs still streams: %s", ct)
+	}
+
+	// The control aliases still answer, and still share their handlers.
+	code, body, raw := callJSON(t, h, "GET", "http://127.0.0.1:10721/api/status", nil, nil)
+	if code != 200 || body["role"] != "agent" {
+		t.Fatalf("/api/status must keep identifying this node: %d %s", code, raw)
+	}
+	for _, path := range []string{"/api/tuning/status", "/api/quantization/status"} {
+		if code, _, raw := callJSON(t, h, "GET", "http://127.0.0.1:10721"+path, nil, nil); code != 200 {
+			t.Fatalf("%s: %d %s", path, code, raw)
+		}
+	}
+	// The v1 dialog endpoints are the supported replacement.
+	if code, _, raw := callJSON(t, h, "POST", "http://127.0.0.1:10721/api/v1/node/dialog/file", nil, nil); code == 404 {
+		t.Fatalf("the v1 dialog route must still exist: %s", raw)
+	}
+}

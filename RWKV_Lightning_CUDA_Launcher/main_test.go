@@ -380,19 +380,18 @@ func TestReadinessIsReal(t *testing.T) {
 		t.Fatal("backend status was not used")
 	}
 }
-func TestProxyRawContinuationAndErrors(t *testing.T) {
+func TestProxyIsTransparentAndReportsErrors(t *testing.T) {
+	// /v1 passes through untouched. The launcher used to sniff POSTs to
+	// /v1/chat/completions and reroute a `contents` body to
+	// /v1/batch/completions for the old WebUI; the current console addresses
+	// /v1/batch/completions itself, so a body is no longer inspected and a
+	// path is no longer rewritten.
+	var seen []string
 	native := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
 		if r.Header.Get("Authorization") != "Bearer managed-secret" {
 			t.Error("missing managed auth")
 		}
-		if bytes.Contains(body, []byte(`"contents"`)) {
-			if r.URL.Path != "/v1/batch/completions" {
-				t.Error(r.URL.Path)
-			}
-		} else if r.URL.Path != "/v1/chat/completions" {
-			t.Error(r.URL.Path)
-		}
+		seen = append(seen, r.URL.Path)
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"你好\"}}]}\n\ndata: [DONE]\n\n")
 	}))
@@ -401,14 +400,25 @@ func TestProxyRawContinuationAndErrors(t *testing.T) {
 	l := newLauncher()
 	l.config.Port = u.Port()
 	l.config.Password = "managed-secret"
-	for _, body := range []string{`{"contents":["English: Hello\n\nChinese:"],"stream":true}`, `{"messages":[{"role":"user","content":"hi"}],"stream":true}`} {
-		r := httptest.NewRequest("POST", "http://127.0.0.1:8088/v1/chat/completions", strings.NewReader(body))
+
+	for _, c := range []struct{ path, body string }{
+		{"/v1/chat/completions", `{"messages":[{"role":"user","content":"hi"}],"stream":true}`},
+		// A raw continuation posted to the chat path stays on the chat path.
+		{"/v1/chat/completions", `{"contents":["English: Hello\n\nChinese:"],"stream":true}`},
+		{"/v1/batch/completions", `{"contents":["English: Hello\n\nChinese:"],"stream":true}`},
+	} {
+		r := httptest.NewRequest("POST", "http://127.0.0.1:8088"+c.path, strings.NewReader(c.body))
 		w := httptest.NewRecorder()
 		l.handler().ServeHTTP(w, r)
 		if w.Code != 200 || !strings.Contains(w.Body.String(), "[DONE]") {
-			t.Fatal(w.Code, w.Body.String())
+			t.Fatal(c.path, w.Code, w.Body.String())
 		}
 	}
+	want := []string{"/v1/chat/completions", "/v1/chat/completions", "/v1/batch/completions"}
+	if !reflect.DeepEqual(seen, want) {
+		t.Fatalf("proxy rewrote a path: got %v, want %v", seen, want)
+	}
+
 	native.Close()
 	r := httptest.NewRequest("POST", "http://127.0.0.1:8088/v1/chat/completions", strings.NewReader(`{}`))
 	w := httptest.NewRecorder()

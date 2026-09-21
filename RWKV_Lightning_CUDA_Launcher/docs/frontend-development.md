@@ -42,7 +42,7 @@ go build -o rwkv_launcher .
 bun run dev
 ```
 
-Vite 默认端口 5173，`/api`、`/v1`、`/logs` 代理到 `127.0.0.1:10721`。Go 未启动时前端页面可以加载，API 会失败。若要验证本机 runtime 启停，把 Launcher 放在原生二进制同目录并以全套形态启动；`go run .` 的临时目录不适合验证这个场景。
+Vite 默认端口 5173，`/api`、`/v1` 代理到 `127.0.0.1:10721`。Go 未启动时前端页面可以加载，API 会失败。若要验证本机 runtime 启停，把 Launcher 放在原生二进制同目录并以全套形态启动；`go run .` 的临时目录不适合验证这个场景。
 
 其他命令：`bun test --watch tests` 持续测试，`bun run test:go` 跑 Go race 测试，`bun run preview` 仅预览静态构建（不提供 Go 控制面）。生产只需 Go/原生二进制，无需 Node 或 Bun。
 
@@ -85,7 +85,7 @@ Go 侧：`main.go` 管进程、CLI 参数与启动；`api.go` 管控制路由和
 
 `visible_devices` 是三态字符串，不要退化成数字数组：`DeviceSelection` 的 `inherit` 会省略字段（由 Agent 按 §选卡 优先级链解析），`none` 发送 `""`（显式不注入），`explicit` 发送实际选卡串。`applyDevice()` 负责落到请求体。量化没有选卡控件——`rwkv_quantize` 是纯 CPU 工具。
 
-Translate 直接调用 `/v1/batch/completions`（不再依赖 Go 的 `contents → batch` 改写），每批最多 128 行，结果按 `choices[].index` 回填。
+Translate 直接调用 `/v1/batch/completions`，每批最多 128 行，结果按 `choices[].index` 回填。Go 侧给旧 WebUI 用的 `contents → batch` 改写已删除，`/v1` 是透明反代——把 `contents` 发到 `/v1/chat/completions` 不会再被改写成 batch。
 
 ## 提交与构建产物
 

@@ -37,7 +37,7 @@ Runtime / Tuning / Quantization 请求体集中定义在 `request_types.go`，�
                                                         (127.0.0.1，可以不设)
 ```
 
-- 配置了 `--token` 后，`/api/*`、`/logs`、`/v1/*` 全部要求 `Authorization: Bearer <token>`（含本机 `/v1` 反代——否则 token 化的 Agent 会因 password 自动注入变成开放推理代理）。
+- 配置了 `--token` 后，`/api/*`、`/v1/*` 全部要求 `Authorization: Bearer <token>`（含本机 `/v1` 反代——否则 token 化的 Agent 会因 password 自动注入变成开放推理代理）。
 - token 不接受 query string 传参；401 响应体只回 `{"error":"unauthorized"}`，不含任何路径或配置信息；比较用常量时间。
 - agent token 与 runtime password 是两个信任域，禁止合并。Agent 校验 token 后，向 runtime 转发时删除该 Authorization，再按 `config.Password` 设置凭证；runtime 未设密码时不发送 Authorization。未配置 Agent token 的本机旧模式仍保留调用方提供的 runtime Authorization，缺省时才注入配置密码。
 
@@ -52,9 +52,9 @@ Runtime / Tuning / Quantization 请求体集中定义在 `request_types.go`，�
 | GET | `/api/v1/node` | role / version / capabilities / runtime 概况 | `/api/status` |
 | GET | `/api/v1/node/metrics` | GPU 指标 | 新增 |
 | POST | `/api/v1/node/fs` | 目录浏览（白名单内） | 新增 |
-| POST | `/api/v1/node/dialog/file` | 宿主机原生文件选择器 | `/api/pick-file` |
-| POST | `/api/v1/node/dialog/directory` | 宿主机原生目录选择器 | `/api/pick-directory` |
-| POST | `/api/v1/node/dialog/reveal` | 在宿主机打开 checkpoint 目录 | `/api/tuning/open-folder` |
+| POST | `/api/v1/node/dialog/file` | 宿主机原生文件选择器 | 已移除 |
+| POST | `/api/v1/node/dialog/directory` | 宿主机原生目录选择器 | 已移除 |
+| POST | `/api/v1/node/dialog/reveal` | 在宿主机打开 checkpoint 目录 | 已移除 |
 
 三个 `dialog/*` 仅在 Agent 角色 + loopback 来源下可用；Client 形态或远程调用返回 `400 {"error":"unsupported","reason":"host-local only"}`。能力位 `host_dialog` 只在本机全套形态出现。
 
@@ -67,7 +67,7 @@ Runtime / Tuning / Quantization 请求体集中定义在 `request_types.go`，�
 | POST | `/api/v1/runtime/stop` | 停止 | `/api/stop` |
 | POST | `/api/v1/runtime/restart` | 用实际运行配置重启 | `/api/restart` |
 | POST | `/api/v1/runtime/load` | 选卡（重）加载：停止 → 以 `visible_devices` 重启 → 等就绪 →（动态模式）加载模型 | — |
-| GET | `/api/v1/runtime/logs` | SSE 日志流 | `/logs` |
+| GET | `/api/v1/runtime/logs` | SSE 日志流 | 已移除（旧版 *agent* 上仍是 `/logs`，见 §兼容） |
 
 ### 任务（Agent）
 

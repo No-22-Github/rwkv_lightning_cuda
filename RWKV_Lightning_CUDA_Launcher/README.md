@@ -84,7 +84,7 @@ rwkv_launcher --client                         # 控制台：仅 Client（本机
 bun run dev
 ```
 
-Vite 将 `/api`、`/v1` 和 `/logs` 转发到 `127.0.0.1:10721`。生产流量直接走 Go，没有 Node 中间层。`go run .` 的临时可执行目录不包含原生二进制，不适合验证本地进程启动。
+Vite 将 `/api` 和 `/v1` 转发到 `127.0.0.1:10721`。生产流量直接走 Go，没有 Node 中间层。`go run .` 的临时可执行目录不包含原生二进制，不适合验证本地进程启动。
 
 ## 使用
 
@@ -132,7 +132,7 @@ Translate: browser /v1/batch/completions + contents (每批最多 128 个 prompt
         → native  /v1/batch/completions
 ```
 
-新前端已直接调用 `/v1/batch/completions`，不再依赖改写。Go 侧的 `contents → batch` 适配仅保留给仓库中尚未替换的旧 `dist/`：仅当 body 有 `contents` 且没有 `messages` 时适配，body 不变。翻译以每个非空输入行为一个 chunk，前端按 1–128 的 batch size 分组，每组作为一个原生 batch 请求执行，**不调用任何专用 Translation API**。
+前端直接调用 `/v1/batch/completions`。Go 侧曾有一段 `contents → batch` 适配（POST `/v1/chat/completions` 且 body 有 `contents`、没有 `messages` 时改写路径），那是给旧 WebUI 的；旧 WebUI 已随本次重做移除，适配也一并删除，`/v1` 现在是完全透明的反向代理。翻译以每个非空输入行为一个 chunk，前端按 1–128 的 batch size 分组，每组作为一个原生 batch 请求执行，**不调用任何专用 Translation API**。
 
 翻译 sampler 采用当前兼容翻译实现中的参数：`max_tokens=2048`、`temperature=1`、`top_k=1`、`top_p=0`、presence/frequency penalty=0、`stop_tokens=[0]`。翻译请求使用 `stream=false`，每行完成后一次显示完整结果；普通 Chat 仍使用流式输出。
 
@@ -190,13 +190,15 @@ State tuning 使用 `.pth` 基础模型，最终张量结构由原生加载器�
 
 WebUI 使用 [新控制面 API](docs/control-plane-api.md)：浏览器只与本机 Client 同源通信，节点级请求都带 `/api/v1/backends/{id}` 前缀；`src/lib/api/http.ts` 是唯一出口。接入步骤见 [联调指南](docs/integration-guide.md)。
 
-下表为保留的旧 alias，仅用于旧 `dist/` 与第三方兼容，内部转调同一个 handler。
+下表为保留的旧 alias，内部转调同一个 handler。旧 WebUI 已移除，因此这些 alias 现在只服务两类调用方：第三方脚本，以及探测阶梯靠 `GET /api/status` 识别 agent 的旧版 Client。
 
 控制面接口的完整路径表、schema 与安全模型见 [docs/control-plane-api.md](docs/control-plane-api.md)。所有 POST 都发送 JSON，失败返回实际 `{"error":"..."}` 与 HTTP 错误码。
 
 新控制面（`/api/v1`）：`/api/v1/node`、`/api/v1/node/metrics`、`/api/v1/node/fs`、`/api/v1/node/dialog/{file,directory,reveal}`、`/api/v1/runtime`（+ `start/stop/restart/logs`）、`/api/v1/jobs`（+ `/{id}`、`/tuning`、`/tuning/validate`、`/quantization`、`/{id}/stop`、`/{id}/logs`）、`/api/v1/backends`（Client：增删查 + `/{id}/probe` + `/{id}/api/v1/*`、`/{id}/v1/*` 转发）。
 
-老路径全部保留为 alias，内部转调同一个 handler：
+保留的老路径 alias（内部转调同一个 handler）：
+
+随旧 WebUI 一起移除的是只有本机页面会调的那几个：`/api/pick-file`、`/api/pick-directory`、`/api/tuning/open-folder`（宿主机对话框，`legacyRoutes` 从不把它们转发给远端 agent，所以除了本机页面没有调用方）和 `/logs`（由 `/api/v1/runtime/logs` 取代）。转发给**旧版 agent** 时仍会映射到那个 agent 自己的 `/logs`。
 
 | Method | Path                       | 行为                                                            |
 | ------ | -------------------------- | --------------------------------------------------------------- |
@@ -204,14 +206,10 @@ WebUI 使用 [新控制面 API](docs/control-plane-api.md)：浏览器只与本�
 | POST   | `/api/start`               | RuntimeConfig；验证路径/端口并启动                              |
 | POST   | `/api/stop`                | 等待运行进程退出                                                |
 | POST   | `/api/restart`             | 使用上次实际启动配置停止并重启                                  |
-| POST   | `/api/pick-file`           | 原生宿主机文件选择；仅 Agent 角色 + loopback 来源，否则明确报错 |
-| POST   | `/api/pick-directory`      | 原生宿主机目录选择，用于训练输出目录                            |
-| GET    | `/logs`                    | 保留旧 Runtime SSE 日志入口                                     |
 | GET    | `/api/tuning/status`       | 训练状态、可执行文件是否存在、日志、进度、loss 数据、checkpoint |
 | POST   | `/api/tuning/validate`     | `{"path":"..."}`，返回有效样本数或准确行号错误                  |
 | POST   | `/api/tuning/start`        | TuningConfig，按 method=state/miss 启动对应训练程序             |
 | POST   | `/api/tuning/stop`         | 停止训练进程                                                    |
-| POST   | `/api/tuning/open-folder`  | 打开最近实际保存 checkpoint 所在文件夹                          |
 | GET    | `/api/quantization/status` | 量化进程状态、工具可用性、输出路径与日志                        |
 | POST   | `/api/quantization/start`  | 启动 W8A16 或 W4A16 `.pth` → `.rwkvq` 转换                      |
 | POST   | `/api/quantization/stop`   | 停止量化进程                                                    |

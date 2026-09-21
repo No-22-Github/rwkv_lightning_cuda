@@ -879,27 +879,14 @@ func (l *launcher) proxy(w http.ResponseWriter, r *http.Request) {
 	config := l.config
 	l.mu.Unlock()
 	target, _ := url.Parse("http://127.0.0.1:" + config.Port)
-	if r.URL.Path == "/v1/chat/completions" && r.Method == "POST" {
-		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 16<<20))
-		if err != nil {
-			writeJSON(w, 400, map[string]any{"error": err.Error()})
-			return
-		}
-		var payload map[string]json.RawMessage
-		if err = json.Unmarshal(body, &payload); err != nil {
-			writeJSON(w, 400, map[string]any{"error": err.Error()})
-			return
-		}
-		// CUDA chat adds a User/Assistant envelope. Raw contents must use the existing generic continuation handler.
-		// Retained for the legacy dist until the frontend batch switches to /v1/batch/completions (§5.6).
-		if _, raw := payload["contents"]; raw {
-			if _, chat := payload["messages"]; !chat {
-				r.URL.Path = "/v1/batch/completions"
-			}
-		}
-		r.Body = io.NopCloser(bytes.NewReader(body))
-		r.ContentLength = int64(len(body))
-	}
+	// /v1 is a transparent pass-through. It used to sniff POSTs to
+	// /v1/chat/completions and rewrite a `contents` body to
+	// /v1/batch/completions, because the old WebUI sent raw continuations to
+	// the chat path. That WebUI is gone — the current console posts raw
+	// continuations to /v1/batch/completions itself (see
+	// src/lib/api/inference.ts) — so the launcher no longer buffers and
+	// re-parses up to 16 MiB of every chat request to guess what the caller
+	// meant.
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	proxy.FlushInterval = -1
 	original := proxy.Director

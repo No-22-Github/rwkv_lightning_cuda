@@ -212,7 +212,19 @@ func (l *launcher) handler() http.Handler {
 	apiV1(mux, "POST /api/v1/backends/{id}/probe", l.handleBackendsProbe)
 	mux.HandleFunc("/api/v1/backends/{id}/{rest...}", l.handleForward)
 
-	// ---- Legacy aliases: same handlers, no second implementations ----
+	// ---- Legacy aliases ----
+	// These are the pre-/api/v1 control paths, kept for two callers that are
+	// NOT the old WebUI: third-party scripts, and an older Client whose probe
+	// ladder identifies an agent by GET /api/status. They dispatch to the same
+	// handlers as their /api/v1 twins — two implementations would drift apart
+	// on the next field change.
+	//
+	// The WebUI-only aliases are gone with the WebUI that used them: the host
+	// dialogs (/api/pick-file, /api/pick-directory, /api/tuning/open-folder),
+	// which legacyRoutes deliberately never forwarded to a remote agent and so
+	// had no caller but the local page, and /logs, replaced by
+	// /api/v1/runtime/logs. Forwarding to a *legacy agent* still maps onto
+	// that agent's own /logs — see legacyRoutes.
 	api(mux, "/api/status", "GET", func(w http.ResponseWriter, r *http.Request) error {
 		writeJSON(w, 200, l.statusAliasPayload())
 		return nil
@@ -220,8 +232,6 @@ func (l *launcher) handler() http.Handler {
 	api(mux, "/api/start", "POST", func(w http.ResponseWriter, r *http.Request) error { return l.runtimeAction("start", w, r) })
 	api(mux, "/api/stop", "POST", func(w http.ResponseWriter, r *http.Request) error { return l.runtimeAction("stop", w, r) })
 	api(mux, "/api/restart", "POST", func(w http.ResponseWriter, r *http.Request) error { return l.runtimeAction("restart", w, r) })
-	api(mux, "/api/pick-file", "POST", l.handleDialogFile)
-	api(mux, "/api/pick-directory", "POST", l.handleDialogDirectory)
 	api(mux, "/api/tuning/validate", "POST", l.handleJobValidate)
 	api(mux, "/api/tuning/status", "GET", func(w http.ResponseWriter, r *http.Request) error {
 		writeJSON(w, 200, l.tuningStatus())
@@ -231,7 +241,6 @@ func (l *launcher) handler() http.Handler {
 	api(mux, "/api/tuning/stop", "POST", func(w http.ResponseWriter, r *http.Request) error {
 		return l.jobStop(l.tuning)
 	})
-	api(mux, "/api/tuning/open-folder", "POST", l.handleDialogReveal)
 	api(mux, "/api/quantization/status", "GET", func(w http.ResponseWriter, r *http.Request) error {
 		writeJSON(w, 200, l.quantizationStatus())
 		return nil
@@ -240,7 +249,6 @@ func (l *launcher) handler() http.Handler {
 	api(mux, "/api/quantization/stop", "POST", func(w http.ResponseWriter, r *http.Request) error {
 		return l.jobStop(l.quantization)
 	})
-	mux.HandleFunc("/logs", l.runtime.sse)
 	mux.HandleFunc("/v1/", l.proxy)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -291,7 +299,7 @@ func (l *launcher) handler() http.Handler {
 }
 
 func pathNeedsToken(path string) bool {
-	return strings.HasPrefix(path, "/api") || strings.HasPrefix(path, "/v1") || path == "/logs"
+	return strings.HasPrefix(path, "/api") || strings.HasPrefix(path, "/v1")
 }
 
 // ---- shared handler bodies ----

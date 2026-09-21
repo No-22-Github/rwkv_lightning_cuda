@@ -108,7 +108,7 @@ curl -sS "$BACKEND_URL/v1/batch/completions" \
 
 Chat 使用 `messages` 并由服务端套聊天模板；batch 使用 `contents[]` 做原始续写。客户端按返回的 `choices[].index` 对应输入；非流式文本见 `choices[].message.content`。不要向远端 Chat 发送 `contents` 来假设它会变成 raw continuation。
 
-本机旧 WebUI 目前仍依赖 Launcher 的 Chat→batch 兼容改写。新前端应显式调用 batch；移除旧改写需与前端源码及 `dist/` 同批发布。
+Launcher 曾为旧 WebUI 把 Chat 上的 `contents` 改写成 batch；旧 WebUI 移除后该改写已删除。客户端必须自己选对端点：原始续写发 `/v1/batch/completions`，聊天发 `/v1/chat/completions`。
 
 ### OpenAI Python SDK
 
