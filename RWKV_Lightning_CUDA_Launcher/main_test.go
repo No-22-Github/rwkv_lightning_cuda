@@ -432,7 +432,7 @@ func TestStaticHostAndSecurity(t *testing.T) {
 	for _, c := range []struct {
 		method, path, origin string
 		want                 int
-	}{{"GET", "/", "", 200}, {"GET", "/api/status", "", 200}, {"GET", "/api/start", "", 405}, {"POST", "/api/stop", "https://evil.example", 403}} {
+	}{{"GET", "/", "", 200}, {"GET", "/api/v1/backends", "", 200}, {"GET", "/api/v1/nope", "", 404}, {"POST", "/api/v1/runtime/stop", "https://evil.example", 403}} {
 		r := httptest.NewRequest(c.method, "http://127.0.0.1:8088"+c.path, nil)
 		r.Header.Set("Origin", c.origin)
 		w := httptest.NewRecorder()
@@ -444,7 +444,7 @@ func TestStaticHostAndSecurity(t *testing.T) {
 			t.Fatal("static app missing")
 		}
 	}
-	r := httptest.NewRequest("GET", "http://evil.example/api/status", nil)
+	r := httptest.NewRequest("GET", "http://evil.example/api/v1/backends", nil)
 	w := httptest.NewRecorder()
 	l.handler().ServeHTTP(w, r)
 	if w.Code != 403 {

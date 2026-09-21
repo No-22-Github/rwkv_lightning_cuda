@@ -105,8 +105,9 @@ func probeServer(t *testing.T, handler http.Handler) string {
 	return srv.URL
 }
 
-// TestProbeLadder covers M3: new agent (with an unknown capability bit),
-// old agent, bare inference node, client, 401, unreachable.
+// TestProbeLadder covers M3: agent (with an unknown capability bit), bare
+// inference node, a host that speaks only the removed pre-v1 surface, a
+// Client, 401 and unreachable.
 func TestProbeLadder(t *testing.T) {
 	newAgent := probeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/node" {
@@ -120,16 +121,19 @@ func TestProbeLadder(t *testing.T) {
 		t.Fatalf("new agent probe: %+v", p)
 	}
 
-	oldAgent := probeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// A host that answers only the removed pre-v1 surface is not an agent any
+	// more. The ladder no longer has a rung for it, so it reads as
+	// unreachable with the reason attached — never as a half-capable agent.
+	preV1 := probeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/status" {
 			fmt.Fprint(w, `{"status":"offline","running":false}`)
 			return
 		}
 		w.WriteHeader(404)
 	}))
-	p = probeBackend(oldAgent, "")
-	if !p.Reachable || p.Kind != "agent" || fmt.Sprint(p.Capabilities) != fmt.Sprint([]string{"runtime"}) {
-		t.Fatalf("old agent probe: %+v", p)
+	p = probeBackend(preV1, "")
+	if p.Reachable || p.Kind != "" || p.ProbeError == "" {
+		t.Fatalf("pre-v1 host must not classify as an agent: %+v", p)
 	}
 
 	bare := probeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -144,8 +148,10 @@ func TestProbeLadder(t *testing.T) {
 		t.Fatalf("bare probe: %+v", p)
 	}
 
+	// A Client answers /api/v1/node with role=client and must never be taken
+	// for an Agent.
 	client := probeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/status" {
+		if r.URL.Path == "/api/v1/node" {
 			fmt.Fprint(w, `{"status":"offline","role":"client"}`)
 			return
 		}

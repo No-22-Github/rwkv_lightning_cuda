@@ -191,30 +191,21 @@ State tuning 使用 `.pth` 基础模型，最终张量结构由原生加载器�
 
 WebUI 使用 [新控制面 API](docs/control-plane-api.md)：浏览器只与本机 Client 同源通信，节点级请求都带 `/api/v1/backends/{id}` 前缀；`src/lib/api/http.ts` 是唯一出口。接入步骤见 [联调指南](docs/integration-guide.md)。
 
-下表为保留的旧 alias，内部转调同一个 handler。旧 WebUI 已移除，因此这些 alias 现在只服务两类调用方：第三方脚本，以及探测阶梯靠 `GET /api/status` 识别 agent 的旧版 Client。
-
 控制面接口的完整路径表、schema 与安全模型见 [docs/control-plane-api.md](docs/control-plane-api.md)。所有 POST 都发送 JSON，失败返回实际 `{"error":"..."}` 与 HTTP 错误码。
 
 新控制面（`/api/v1`）：`/api/v1/node`、`/api/v1/node/metrics`、`/api/v1/node/fs`、`/api/v1/node/dialog/{file,directory,reveal}`、`/api/v1/runtime`（+ `start/stop/restart/logs`）、`/api/v1/jobs`（+ `/{id}`、`/tuning`、`/tuning/validate`、`/quantization`、`/{id}/stop`、`/{id}/logs`）、`/api/v1/backends`（Client：增删查 + `/{id}/probe` + `/{id}/api/v1/*`、`/{id}/v1/*` 转发）。
 
-保留的老路径 alias（内部转调同一个 handler）：
+**没有旧路径 alias。** `/api/v1` 是唯一的控制面。pre-v1 的 `/api/status`、
+`/api/start`、`/api/stop`、`/api/restart`、`/api/tuning/*`、
+`/api/quantization/*`、`/api/pick-file`、`/api/pick-directory`、
+`/api/tuning/open-folder` 和 `/logs` 全部移除，未知 `/api` 路径一律返回
+JSON 404。连带移除的还有"连接旧版 Agent"的转发适配（原 `legacy.go`）：
+探测阶梯现在只有 `/api/v1/node` → `/v1/server/status` 两级，只会说 pre-v1
+协议的主机不再被识别成 agent。
 
-随旧 WebUI 一起移除的是只有本机页面会调的那几个：`/api/pick-file`、`/api/pick-directory`、`/api/tuning/open-folder`（宿主机对话框，`legacyRoutes` 从不把它们转发给远端 agent，所以除了本机页面没有调用方）和 `/logs`（由 `/api/v1/runtime/logs` 取代）。转发给**旧版 agent** 时仍会映射到那个 agent 自己的 `/logs`。
-
-| Method | Path                       | 行为                                                            |
-| ------ | -------------------------- | --------------------------------------------------------------- |
-| GET    | `/api/status`              | 进程状态、真实 backend status、脱敏配置、最近 2000 行日志       |
-| POST   | `/api/start`               | RuntimeConfig；验证路径/端口并启动                              |
-| POST   | `/api/stop`                | 等待运行进程退出                                                |
-| POST   | `/api/restart`             | 使用上次实际启动配置停止并重启                                  |
-| GET    | `/api/tuning/status`       | 训练状态、可执行文件是否存在、日志、进度、loss 数据、checkpoint |
-| POST   | `/api/tuning/validate`     | `{"path":"..."}`，返回有效样本数或准确行号错误                  |
-| POST   | `/api/tuning/start`        | TuningConfig，按 method=state/miss 启动对应训练程序             |
-| POST   | `/api/tuning/stop`         | 停止训练进程                                                    |
-| GET    | `/api/quantization/status` | 量化进程状态、工具可用性、输出路径与日志                        |
-| POST   | `/api/quantization/start`  | 启动 W8A16 或 W4A16 `.pth` → `.rwkvq` 转换                      |
-| POST   | `/api/quantization/stop`   | 停止量化进程                                                    |
-| \*     | `/v1/*`                    | 转发到本 Launcher 管理的原生 backend，SSE 即时 flush            |
+这意味着 **Client 与 Agent 必须同版本部署**。这是有意的取舍——本次重做从干净
+版本起步，不承担混版本兼容的负担。跨版本策略见
+[未决事项](docs/open-items.md)。
 
 请求体 TypeScript 类型与默认值见 `src/lib/api/types.ts` 与 `src/lib/api/launcher.ts`；完整字段以 [API 参考](docs/control-plane-api.md) 为准。推理接口沿用项目文档，没有新增原生 CLI flag（选卡走环境变量注入）。loopback 形态验证 Host / Origin；非 loopback 的 Agent 以 `--token` 鉴权并保留 same-origin 浏览器检查。Markdown 不直接解析原始 HTML；助手输出完整 HTML 或闭合的 `html` fence 时会出现新标签页预览按钮，生成内容运行在不带同源权限的 sandbox iframe 中。
 

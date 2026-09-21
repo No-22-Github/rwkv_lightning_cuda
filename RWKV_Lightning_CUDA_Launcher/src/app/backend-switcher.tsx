@@ -78,10 +78,8 @@ export function BackendSwitcher() {
           </span>
           <span className="flex items-center gap-2 px-3 pt-1.5 pb-2.5">
             <span className="inline-flex h-[18px] items-center rounded-md bg-muted px-1.5 text-[10px] text-muted-foreground">
-              {backendKindLabel(
-                current?.kind ?? "",
-                current?.legacy ?? false,
-              ) || t("backend.kind.unknown")}
+              {backendKindLabel(current?.kind ?? "") ||
+                t("backend.kind.unknown")}
             </span>
             {status && (
               <StatusPill

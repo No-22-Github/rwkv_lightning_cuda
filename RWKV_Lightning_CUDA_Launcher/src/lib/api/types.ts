@@ -27,7 +27,6 @@ export interface BackendView {
   base_url: string;
   has_token: boolean;
   kind: BackendKind;
-  legacy: boolean;
   capabilities: Capability[];
   reachable: boolean;
   last_probe: number;

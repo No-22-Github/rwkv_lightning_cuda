@@ -231,7 +231,7 @@ func (p *process) snapshot() map[string]any {
 	return map[string]any{"status": p.state, "running": p.cmd != nil, "error": p.errorText, "logs": append([]string{}, p.logs...), "progress": p.progress, "losses": append([]map[string]any{}, p.losses...), "checkpoint": p.checkpoint, "elapsed": elapsed}
 }
 
-// Keep the legacy runtime log stream available to existing local clients.
+// SSE log stream shared by the runtime and both job processes.
 func (p *process) sse(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -390,9 +390,9 @@ func (l *launcher) capabilities() []string {
 }
 
 // status is the RuntimeState payload shared by /api/v1/runtime and
-// /api/v1/node (§6.1). It adds role-agnostic fields on top of the legacy
-// shape: available (can this host start a runtime at all) and visible_devices
-// (the raw spec the current runtime was pinned to, §5.8(b)).
+// /api/v1/node (§6.1): process state plus available (can this host start a
+// runtime at all), visible_devices (the raw spec the current runtime was
+// pinned to, §5.8(b)), card and managed.
 func (l *launcher) status() map[string]any {
 	l.mu.Lock()
 	config := l.config
@@ -440,25 +440,13 @@ func (l *launcher) status() map[string]any {
 }
 
 // nodePayload is GET /api/v1/node (§6.1): everything status() reports plus
-// the node identity fields the Client's capability probe reads.
+// the node identity fields the Client's capability probe reads. This is the
+// only shape a node is ever identified by.
 func (l *launcher) nodePayload() map[string]any {
 	out := l.status()
 	out["role"] = "agent"
 	out["version"] = launcherVersion
 	out["capabilities"] = l.capabilities()
-	return out
-}
-
-// statusAliasPayload keeps the legacy /api/status contract: the RuntimeState
-// shape, 200 even in client-only form (an old WebUI must keep rendering),
-// with a role marker so the Client's probe never mistakes a Client for an
-// old Agent.
-func (l *launcher) statusAliasPayload() map[string]any {
-	if l.role() != "client" {
-		return l.nodePayload()
-	}
-	out := l.status()
-	out["role"] = "client"
 	return out
 }
 
@@ -892,8 +880,9 @@ func (l *launcher) proxy(w http.ResponseWriter, r *http.Request) {
 	original := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		original(req)
-		// The authenticated Agent credential belongs to this hop only.
-		// Without an Agent token retain legacy caller-supplied runtime auth.
+		// The Agent token authenticates this hop only and means nothing to
+		// the runtime, so drop it. Without an Agent token the caller may be
+		// supplying the runtime's own password — keep that one.
 		if l.token != "" {
 			req.Header.Del("Authorization")
 		}

@@ -1,8 +1,9 @@
 package main
 
 // §5.3–§5.4 Client-side backend registry and forwarding. The registry is
-// the only persistent Client state (0600 JSON file). Forwarding strips the
-// /api/v1/backends/{id} prefix, swaps the Authorization header for the
+// the only persistent Client state (0600 JSON file). Every registered node
+// speaks /api/v1 — there is no protocol adapter any more. Forwarding strips
+// the /api/v1/backends/{id} prefix, swaps the Authorization header for the
 // backend's token, removes browser provenance after entrance validation,
 // and passes remaining end-to-end headers, status, method and body through
 // byte-for-byte — never re-marshalling JSON (the Agent's decode() uses
@@ -34,7 +35,6 @@ type backendEntry struct {
 }
 
 type probeResult struct {
-	Legacy       bool     `json:"legacy"`
 	Kind         string   `json:"kind"`
 	Capabilities []string `json:"capabilities"`
 	Reachable    bool     `json:"reachable"`
@@ -43,7 +43,6 @@ type probeResult struct {
 }
 
 type backendView struct {
-	Legacy       bool     `json:"legacy"`
 	ID           string   `json:"id"`
 	Name         string   `json:"name"`
 	BaseURL      string   `json:"base_url"`
@@ -260,7 +259,7 @@ func (rg *registry) list(local localProvider) []backendView {
 		}
 		return backendView{
 			ID: e.ID, Name: e.Name, BaseURL: e.BaseURL, HasToken: e.Token != "",
-			Legacy: p.Legacy, Kind: p.Kind, Capabilities: caps, Reachable: p.Reachable,
+			Kind: p.Kind, Capabilities: caps, Reachable: p.Reachable,
 			LastProbe: p.LastProbe, ProbeError: p.ProbeError,
 		}
 	}
@@ -273,22 +272,21 @@ func (rg *registry) list(local localProvider) []backendView {
 	return views
 }
 
-// probeBackend implements the §5.4 ladder: /api/v1/node → /api/status →
-// /v1/server/status. The capability set is open: unknown values pass through
-// untouched and must never fail a client (M3).
+// probeBackend implements the §5.4 ladder: /api/v1/node → /v1/server/status.
+// A host that answers neither is unreachable; one that answers only the
+// latter is a bare inference server, not a node this launcher can drive.
+// The capability set is open: unknown values pass through untouched and must
+// never fail a client (M3).
 func probeBackend(baseURL, token string) probeResult {
 	result := probeResult{Capabilities: []string{}}
-	auth := func(req *http.Request) {
-		if token != "" {
-			req.Header.Set("Authorization", "Bearer "+token)
-		}
-	}
 	fetch := func(path string, out *map[string]any) (int, error) {
 		req, err := http.NewRequest("GET", baseURL+path, nil)
 		if err != nil {
 			return 0, err
 		}
-		auth(req)
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
 		resp, err := probeClient.Do(req)
 		if err != nil {
 			return 0, err
@@ -321,49 +319,20 @@ func probeBackend(baseURL, token string) probeResult {
 		return result.withError("authentication failed (HTTP 401): check the backend token")
 	}
 
-	var statusBody map[string]any
-	status2, err2 := fetch("/api/status", &statusBody)
-	if err2 == nil && status2 == 200 {
-		if role, _ := statusBody["role"].(string); role == "client" {
-			return result.withError("target is a launcher client, not a backend")
-		}
-		result.Reachable = true
-		result.Kind = "agent"
-		// Only advertise tools confirmed by the old status endpoints.
-		result.Legacy = true
-		result.Capabilities = []string{"runtime"}
-		var tuning, quantization map[string]any
-		if code, err := fetch("/api/tuning/status", &tuning); err == nil && code == 200 {
-			if tuning["available"] == true {
-				result.Capabilities = append(result.Capabilities, "tuning_state")
-			}
-			if tuning["miss_available"] == true {
-				result.Capabilities = append(result.Capabilities, "tuning_miss")
-			}
-		}
-		if code, err := fetch("/api/quantization/status", &quantization); err == nil && code == 200 && quantization["available"] == true {
-			result.Capabilities = append(result.Capabilities, "quantization")
-		}
-		return result
-	}
-	if status2 == http.StatusUnauthorized {
-		return result.withError("authentication failed (HTTP 401): check the backend token")
-	}
-
 	var server map[string]any
-	status3, err3 := fetch("/v1/server/status", &server)
-	if err3 == nil && status3 == 200 {
+	status2, err2 := fetch("/v1/server/status", &server)
+	if err2 == nil && status2 == 200 {
 		result.Reachable = true
 		result.Kind = "inference_only"
 		result.Capabilities = []string{"inference"}
 		return result
 	}
-	if status3 == http.StatusUnauthorized {
+	if status2 == http.StatusUnauthorized {
 		return result.withError("authentication failed (HTTP 401): check the backend password")
 	}
-	detail := "HTTP " + strconv.Itoa(status3)
-	if err3 != nil {
-		detail = err3.Error() // connection-level failure is the informative case
+	detail := "HTTP " + strconv.Itoa(status2)
+	if err2 != nil {
+		detail = err2.Error() // connection-level failure is the informative case
 	} else if err != nil {
 		detail = err.Error()
 	}

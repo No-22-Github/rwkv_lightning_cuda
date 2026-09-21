@@ -69,7 +69,7 @@ docs/                   对接与开发文档
 dist/                   生产构建产物，**不入库**；由 Go `//go:embed dist/*` 嵌入
 ```
 
-Go 侧：`main.go` 管进程、CLI 参数与启动；`api.go` 管控制路由和鉴权；`request_types.go` 集中定义进程控制请求体；`backends.go` 管注册表和转发；`legacy.go` 管旧协议适配；`fsbrowse.go` 管目录白名单；`devices.go` 管选卡；`metrics*.go` 管指标。构建必须使用 `go build .`，不能只编译 `main.go`。
+Go 侧：`main.go` 管进程、CLI 参数与启动；`api.go` 管控制路由和鉴权；`request_types.go` 集中定义进程控制请求体；`backends.go` 管注册表和转发；`fsbrowse.go` 管目录白名单；`devices.go` 管选卡；`metrics*.go` 管指标。构建必须使用 `go build .`，不能只编译 `main.go`。
 
 ## 多后端前端架构
 
@@ -81,7 +81,7 @@ Go 侧：`main.go` 管进程、CLI 参数与启动；`api.go` 管控制路由和
 - `stores/chat.ts`、`stores/translate.ts`：会话与翻译结果按 backend ID 隔离，翻译还记录 `owner`，切换节点不会串结果。
 - 轮询在 `app/App.tsx`：注册表 8s、runtime/jobs 1.6s、GPU 指标 6s；`NodesPage` 另外每 5s 刷新全部节点。
 
-能力降级：`kind:"inference_only"` 的节点只用推理 API，不显示起停进程、训练、量化、目录浏览与 GPU 指标；旧版 Agent（`legacy:true`）不宣告 `fs` / `metrics` / `host_dialog`；未知 capability 一律忽略。
+能力降级：`kind:"inference_only"` 的节点只用推理 API，不显示起停进程、训练、量化、目录浏览与 GPU 指标；未知 capability 一律忽略。没有旧协议节点这一档——Client 与 Agent 同版本部署。
 
 `visible_devices` 是三态字符串，不要退化成数字数组：`DeviceSelection` 的 `inherit` 会省略字段（由 Agent 按 §选卡 优先级链解析），`none` 发送 `""`（显式不注入），`explicit` 发送实际选卡串。`applyDevice()` 负责落到请求体。量化没有选卡控件——`rwkv_quantize` 是纯 CPU 工具。
 

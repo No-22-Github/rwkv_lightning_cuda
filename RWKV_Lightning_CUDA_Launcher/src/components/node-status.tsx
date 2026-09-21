@@ -109,7 +109,12 @@ export function modelName(runtime?: RuntimeState) {
   if (runtime?.status !== "ready") return "";
   const path = runtime.config?.model_path;
   if (!path) return "";
-  return path.replace(/[/\\]+$/, "").split(/[/\\]/).pop() ?? "";
+  return (
+    path
+      .replace(/[/\\]+$/, "")
+      .split(/[/\\]/)
+      .pop() ?? ""
+  );
 }
 
 export function CapabilityBadges({
@@ -217,8 +222,7 @@ export function GpuMiniRows({ metrics }: { metrics: MetricsResponse }) {
                 {gpu.temperature_c !== undefined
                   ? `${gpu.temperature_c}°C`
                   : "—"}{" "}
-                ·{" "}
-                {gpu.power_watts !== undefined ? `${gpu.power_watts}W` : "—"}
+                · {gpu.power_watts !== undefined ? `${gpu.power_watts}W` : "—"}
               </span>
             </div>
           </div>
@@ -244,9 +248,7 @@ export function gpuUnavailableReason(
       ? t("runtime.gpuReason.unreachable")
       : backend.kind === "inference_only"
         ? t("runtime.gpuReason.inference")
-        : backend.legacy
-          ? t("runtime.gpuReason.legacy")
-          : metricsError || t("runtime.gpuReason.unknown");
+        : metricsError || t("runtime.gpuReason.unknown");
 }
 
 export function GpuList({

@@ -39,9 +39,12 @@ const { useNodes } = await import("../src/stores/nodes");
 const { useChat } = await import("../src/stores/chat");
 const { useTranslate } = await import("../src/stores/translate");
 const { useSettings, useSecret } = await import("../src/stores/settings");
-const { useRuntimeForm, useQuantizationForm, useTuningForm, EMPTY_RUNTIME_FORM } = await import(
-  "../src/stores/forms"
-);
+const {
+  useRuntimeForm,
+  useQuantizationForm,
+  useTuningForm,
+  EMPTY_RUNTIME_FORM,
+} = await import("../src/stores/forms");
 const { applyDevice, deviceSelection, defaultRuntime } = await import(
   "../src/lib/api/launcher"
 );
@@ -124,7 +127,6 @@ const backend = {
   base_url: "http://10.0.0.21:18766",
   has_token: true,
   kind: "agent" as const,
-  legacy: false,
   capabilities: ["runtime", "tuning_state", "quantization", "metrics", "fs"],
   reachable: true,
   last_probe: 1_758_240_000,
@@ -237,7 +239,9 @@ describe("node snapshots", () => {
 
   it("does not call the Agent API for an inference-only node", async () => {
     useBackends.setState({
-      list: [{ ...backend, kind: "inference_only", capabilities: ["inference"] }],
+      list: [
+        { ...backend, kind: "inference_only", capabilities: ["inference"] },
+      ],
       currentId: backend.id,
     });
     fetchSpy.mockImplementation(async () => json({}));
@@ -264,7 +268,9 @@ describe("runtime control", () => {
   it("starts the runtime with the full config plus the device selection", async () => {
     useBackends.setState({ list: [backend], currentId: backend.id });
     const calls = capture();
-    useRuntimeForm.getState().set(backend.id, { model_path: "/data/models/m.pth" });
+    useRuntimeForm
+      .getState()
+      .set(backend.id, { model_path: "/data/models/m.pth" });
     useRuntimeForm
       .getState()
       .setDevices(backend.id, { mode: "explicit", value: "0,1" });
@@ -278,9 +284,7 @@ describe("runtime control", () => {
         ),
       );
     const start = calls.find((call) => call.url.endsWith("/runtime/start"));
-    expect(start?.url).toBe(
-      "/api/v1/backends/a1b2c3/api/v1/runtime/start",
-    );
+    expect(start?.url).toBe("/api/v1/backends/a1b2c3/api/v1/runtime/start");
     expect(start?.method).toBe("POST");
     expect(start?.body?.model_path).toBe("/data/models/m.pth");
     expect(start?.body?.visible_devices).toBe("0,1");
@@ -296,7 +300,9 @@ describe("runtime control", () => {
   });
 
   it("distinguishes the three device-selection states", () => {
-    expect(applyDevice({ ...defaultRuntime }, { mode: "none" }).visible_devices).toBe("");
+    expect(
+      applyDevice({ ...defaultRuntime }, { mode: "none" }).visible_devices,
+    ).toBe("");
     expect(
       applyDevice({ ...defaultRuntime }, { mode: "explicit", value: " 0 " })
         .visible_devices,
@@ -332,10 +338,10 @@ describe("chat streaming", () => {
   it("streams through the backend prefix and persists the answer", async () => {
     const calls = capture();
     await useChat.getState().send(backend.id, "Say hello");
-    const call = calls.find((entry) => entry.url.includes("/v1/chat/completions"));
-    expect(call?.url).toBe(
-      "/api/v1/backends/a1b2c3/v1/chat/completions",
+    const call = calls.find((entry) =>
+      entry.url.includes("/v1/chat/completions"),
     );
+    expect(call?.url).toBe("/api/v1/backends/a1b2c3/v1/chat/completions");
     expect(call?.body?.stream).toBe(true);
     expect(call?.body?.stop_tokens).toEqual([0, 261, 24281]);
     expect(call?.body?.messages).toEqual([
@@ -409,9 +415,7 @@ describe("parallel translation", () => {
       entry.url.includes("/v1/batch/completions"),
     );
     expect(batches).toHaveLength(1);
-    expect(batches[0].url).toBe(
-      "/api/v1/backends/a1b2c3/v1/batch/completions",
-    );
+    expect(batches[0].url).toBe("/api/v1/backends/a1b2c3/v1/batch/completions");
     expect(batches[0].body?.stream).toBe(false);
     expect(batches[0].body?.stop_tokens).toEqual([0]);
     expect(batches[0].body?.contents).toEqual([
@@ -640,18 +644,21 @@ describe("per-backend form isolation", () => {
 
     // Editing one node leaves the other alone.
     useRuntimeForm.getState().set(oneGpu, { model_path: "/srv/b/m.pth" });
-    expect(useRuntimeForm.getState().byBackend[eightGpu].config.model_path).toBe(
-      "/srv/a/m.pth",
-    );
     expect(
-      useRuntimeForm.getState().byBackend[eightGpu].devices,
-    ).toEqual({ mode: "explicit", value: "0,5" });
+      useRuntimeForm.getState().byBackend[eightGpu].config.model_path,
+    ).toBe("/srv/a/m.pth");
+    expect(useRuntimeForm.getState().byBackend[eightGpu].devices).toEqual({
+      mode: "explicit",
+      value: "0,5",
+    });
   });
 
   it("returns one stable object for an unconfigured node", () => {
     // A fresh object per read would spin useSyncExternalStore forever.
-    const a = useRuntimeForm.getState().byBackend["ghost"] ?? EMPTY_RUNTIME_FORM;
-    const b = useRuntimeForm.getState().byBackend["ghost"] ?? EMPTY_RUNTIME_FORM;
+    const a =
+      useRuntimeForm.getState().byBackend["ghost"] ?? EMPTY_RUNTIME_FORM;
+    const b =
+      useRuntimeForm.getState().byBackend["ghost"] ?? EMPTY_RUNTIME_FORM;
     expect(a).toBe(b);
   });
 

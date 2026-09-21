@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -123,7 +122,7 @@ func TestTwoHopBrowserInference(t *testing.T) {
 	}
 }
 
-func TestRuntimeProxyLegacyCredentials(t *testing.T) {
+func TestRuntimeProxyCredentialHandoff(t *testing.T) {
 	for _, caller := range []string{"", "Bearer caller-runtime-secret"} {
 		t.Run(caller, func(t *testing.T) {
 			seen := make(chan string, 1)
@@ -160,7 +159,7 @@ func TestRegistryFailureDoesNotCommit(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			rg.setProbe(be.ID, probeResult{Reachable: true, Legacy: true})
+			rg.setProbe(be.ID, probeResult{Reachable: true, Kind: "agent"})
 			bad := filepath.Join(dir, "blocked")
 			if failure == "parent" {
 				if err := os.WriteFile(bad, []byte("file"), 0600); err != nil {
@@ -231,126 +230,6 @@ func TestIPv6Startup(t *testing.T) {
 	}
 }
 
-func TestLegacyAgentForwarding(t *testing.T) {
-	type request struct{ method, path, body, auth, query string }
-	seen := make(chan request, 32)
-	old := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		switch r.URL.Path {
-		case "/api/status":
-			fmt.Fprint(w, `{"status":"offline","running":false,"config":{"password":""}}`)
-		case "/api/tuning/status":
-			fmt.Fprint(w, `{"available":true,"miss_available":false,"status":"completed"}`)
-		case "/api/quantization/status":
-			fmt.Fprint(w, `{"available":false,"status":"offline"}`)
-		case "/api/start", "/api/stop", "/api/restart", "/api/tuning/start", "/api/tuning/stop", "/api/tuning/validate", "/api/quantization/start", "/api/quantization/stop":
-			seen <- request{r.Method, r.URL.Path, string(raw), r.Header.Get("Authorization"), r.URL.RawQuery}
-			w.Header().Set("X-Legacy", "yes")
-			w.WriteHeader(202)
-			w.Write(raw)
-		case "/logs":
-			w.Header().Set("Content-Type", "text/event-stream")
-			fmt.Fprint(w, "data: legacy-log\n\n")
-			w.(http.Flusher).Flush()
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer old.Close()
-	l := newLauncher()
-	l.clientOnly = true
-	l.backends = openRegistry(filepath.Join(t.TempDir(), "registry.json"))
-	be, err := l.backends.add("old", old.URL, "old-password")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// No explicit probe: first control request must discover the legacy protocol.
-	prefix := "http://127.0.0.1:10721/api/v1/backends/" + be.ID + "/"
-	body := `{ "unknown_future_field": [1, 2], "model_path": "a.pth" }`
-	for _, tc := range []struct{ path, old string }{
-		{"api/v1/runtime/start", "/api/start"}, {"api/v1/runtime/stop", "/api/stop"}, {"api/v1/runtime/restart", "/api/restart"},
-		{"api/v1/jobs/tuning", "/api/tuning/start"}, {"api/v1/jobs/tuning/stop", "/api/tuning/stop"}, {"api/v1/jobs/tuning/validate", "/api/tuning/validate"},
-		{"api/v1/jobs/quantization", "/api/quantization/start"}, {"api/v1/jobs/quantization/stop", "/api/quantization/stop"},
-		{"api/start", "/api/start"},
-	} {
-		code, _, raw := callJSONRaw(t, l.handler(), "POST", prefix+tc.path+"?keep=yes", body, map[string]string{"Origin": "http://127.0.0.1:10721"})
-		if code != 202 || raw != body {
-			t.Fatalf("%s: %d %s", tc.path, code, raw)
-		}
-		req := <-seen
-		if req.method != "POST" || req.path != tc.old || req.body != body || req.auth != "Bearer old-password" || req.query != "keep=yes" {
-			t.Fatalf("forwarded: %+v", req)
-		}
-	}
-	p := l.backends.probeOf(be.ID)
-	if !p.Legacy || fmt.Sprint(p.Capabilities) != "[runtime tuning_state]" {
-		t.Fatalf("legacy probe: %+v", p)
-	}
-	view := l.backendView(be)
-	if !view.Legacy {
-		t.Fatal("legacy protocol not exposed")
-	}
-	for _, path := range []string{"api/v1/runtime", "api/v1/jobs/tuning", "api/v1/jobs/quantization", "api/status", "api/tuning/status", "api/quantization/status"} {
-		code, _, raw := callJSONRaw(t, l.handler(), "GET", prefix+path, "", nil)
-		if code != 200 || !json.Valid([]byte(raw)) {
-			t.Fatalf("%s: %d %s", path, code, raw)
-		}
-	}
-	code, node, raw := callJSONRaw(t, l.handler(), "GET", prefix+"api/v1/node", "", nil)
-	if code != 200 || node["role"] != "agent" || node["version"] != "legacy" || node["status"] != "offline" {
-		t.Fatalf("node: %d %s", code, raw)
-	}
-	code, jobs, raw := callJSONRaw(t, l.handler(), "GET", prefix+"api/v1/jobs", "", nil)
-	if code != 200 || len(jobs["jobs"].(map[string]any)) != 2 {
-		t.Fatalf("jobs: %d %s", code, raw)
-	}
-	for _, path := range []string{"api/v1/runtime/logs", "logs"} {
-		code, _, raw := callJSONRaw(t, l.handler(), "GET", prefix+path, "", nil)
-		if code != 200 || !strings.Contains(raw, "legacy-log") {
-			t.Fatalf("logs: %d %s", code, raw)
-		}
-	}
-	for _, path := range []string{"api/v1/node/fs", "api/v1/node/metrics", "api/v1/node/dialog/file", "api/v1/jobs/tuning/logs"} {
-		code, _, raw := callJSONRaw(t, l.handler(), "POST", prefix+path, `{}`, nil)
-		if code != 501 {
-			t.Fatalf("unsupported %s: %d %s", path, code, raw)
-		}
-	}
-	if code, _, _ := callJSONRaw(t, l.handler(), "POST", prefix+"api/pick-file", `{}`, nil); code != 404 {
-		t.Fatal("legacy host dialog must not be forwarded")
-	}
-}
-
-func TestLegacySummaryErrors(t *testing.T) {
-	for _, tc := range []struct {
-		name, body     string
-		upstream, want int
-	}{
-		{"auth", `{"error":"denied"}`, 401, 401},
-		{"server", `{"error":"busy"}`, 503, 503},
-		{"invalid-json", `not-json`, 200, 502},
-		{"null-node", `null`, 200, 502},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(tc.upstream)
-				fmt.Fprint(w, tc.body)
-			}))
-			defer backend.Close()
-			r := httptest.NewRequest("GET", "http://127.0.0.1/api/v1/node", nil)
-			w := httptest.NewRecorder()
-			forwardLegacySummary(w, r, backendEntry{BaseURL: backend.URL}, "api/v1/node", probeResult{Legacy: true})
-			if w.Code != tc.want {
-				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
-			}
-			if tc.upstream != 200 && w.Body.String() != tc.body {
-				t.Fatalf("error body changed: %s", w.Body.String())
-			}
-		})
-	}
-}
-
 func TestTwoHopBrowserControl(t *testing.T) {
 	agent := newLauncher()
 	agent.listen = "0.0.0.0:18766"
@@ -404,7 +283,7 @@ func TestExternalRuntimeIsReportedReady(t *testing.T) {
 		t.Fatalf("running=%v, want true for a serving runtime", out["running"])
 	}
 
-	// --client-only keeps the legacy contract: no probing, never "ready".
+	// --client-only never probes and is never "ready": it has no runtime.
 	client := newLauncher()
 	client.clientOnly = true
 	client.config.Port = u.Port()

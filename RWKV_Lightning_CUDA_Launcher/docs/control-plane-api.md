@@ -49,7 +49,7 @@ Runtime / Tuning / Quantization 请求体集中定义在 `request_types.go`，�
 
 | 方法 | 路径 | 作用 | 旧路径 |
 | --- | --- | --- | --- |
-| GET | `/api/v1/node` | role / version / capabilities / runtime 概况 | `/api/status` |
+| GET | `/api/v1/node` | role / version / capabilities / runtime 概况 | 已移除 |
 | GET | `/api/v1/node/metrics` | GPU 指标 | 新增 |
 | POST | `/api/v1/node/fs` | 目录浏览（白名单内） | 新增 |
 | POST | `/api/v1/node/dialog/file` | 宿主机原生文件选择器 | 已移除 |
@@ -67,7 +67,7 @@ Runtime / Tuning / Quantization 请求体集中定义在 `request_types.go`，�
 | POST | `/api/v1/runtime/stop` | 停止 | `/api/stop` |
 | POST | `/api/v1/runtime/restart` | 用实际运行配置重启 | `/api/restart` |
 | POST | `/api/v1/runtime/load` | 选卡（重）加载：停止 → 以 `visible_devices` 重启 → 等就绪 →（动态模式）加载模型 | — |
-| GET | `/api/v1/runtime/logs` | SSE 日志流 | 已移除（旧版 *agent* 上仍是 `/logs`，见 §兼容） |
+| GET | `/api/v1/runtime/logs` | SSE 日志流 | 已移除 |
 
 ### 任务（Agent）
 
@@ -95,7 +95,6 @@ Runtime / Tuning / Quantization 请求体集中定义在 `request_types.go`，�
 - `base_url` 不带 `/v1`/`/api` 后缀；带后缀的请求被拒绝。
 - `id` 由 Client 生成（6 位十六进制随机串），不用 base_url 做 id。`local` 固定保留给本机全套形态的本地 runtime，不可删除。
 - 注册表落盘 `{"backends":[{id,name,base_url,token}]}`，文件 0600；**任何响应都不回显 token**。先写入独立临时文件并同步、替换成功后才更新内存；失败返回错误，添加/删除不会假报成功，原节点和探测状态保留。
-- 返回项增加 `legacy: true/false`，表示是否使用旧版 Agent 控制协议；它来自能力探测，不改变持久化文件格式。
 
 ### 转发层（Client）
 
@@ -104,28 +103,37 @@ Runtime / Tuning / Quantization 请求体集中定义在 `request_types.go`，�
 /api/v1/backends/{id}/v1/...       → <base_url>/v1/...
 ```
 
-剥前缀、换 token。Client 入口先执行 Host/Origin/Sec-Fetch-Site 校验，向后端转发时移除 `Origin` 和 `Sec-Fetch-Site`：这已是服务器间请求，目标 Host 与浏览器访问的 Client 不同。其余端到端 header、method、status、body 原样透传（**不 re-marshal**——Agent 侧 `decode()` 开了 `DisallowUnknownFields`，任何字段增删都会让跨版本请求 400）。SSE 路径设 `FlushInterval = -1`。转发传输层无整体/响应头超时（`/v1/model/load` 要等活跃推理排空，几十秒是正常的）。
+剥前缀、换 token。Client 入口先执行 Host/Origin/Sec-Fetch-Site 校验，向后端转发时移除 `Origin` 和 `Sec-Fetch-Site`：这已是服务器间请求，目标 Host 与浏览器访问的 Client 不同。其余端到端 header、method、status、body 原样透传（**不 re-marshal**——Agent 侧 `decode()` 开了 `DisallowUnknownFields`，任何字段增删都会让请求 400）。SSE 路径设 `FlushInterval = -1`。转发传输层无整体/响应头超时（`/v1/model/load` 要等活跃推理排空，几十秒是正常的）。
 
 ### 能力探测（Client，启动时、每 30 秒、添加后端时与 probe 时各跑一次）
 
 1. `GET <base_url>/api/v1/node` → 200 且 `role=="agent"` → 全功能 Agent，读 `capabilities`。
-2. 否则 `GET <base_url>/api/status` → 200 且非 `role=="client"` → 老版本 Agent，标记 `legacy:true`，基础能力为 `runtime`；继续查询旧训练/量化 status，根据 `available` / `miss_available` 增加工具能力。不宣告 `fs`、`metrics` 或 `host_dialog`。若响应带 `role:"client"` 则明确报错（Client 不是 backend）。
-3. 否则 `GET <base_url>/v1/server/status` → 200 → 裸推理节点，能力集 `["inference"]`。
-4. 都不通 → 报错，区分连接失败与 401。
+   若响应带 `role:"client"` 则明确报错（Client 不是 backend，不能当节点用）。
+2. 否则 `GET <base_url>/v1/server/status` → 200 → 裸推理节点，能力集 `["inference"]`。
+3. 都不通 → 报错，区分连接失败与 401。
+
+只回应 pre-v1 路径的主机在第 1 步和第 2 步都不命中，落到第 3 步报不可达。这是
+有意的：它不是这个 Client 能驱动的节点。
 
 `capabilities` 是开放集合：出现未知能力位必须忽略而不是报错。
 
-### 老 Agent 的转发适配
+### 没有跨版本适配
 
-首次控制请求若还没有探测结果，会先探测协议；不对推理请求增加探测或重试。升级 Agent 后可调用 probe 刷新协议标记。
+Client 与 Agent **必须同版本部署**。曾经存在的旧协议适配层（`legacy.go`）已移除：
+不再把 `/api/v1/*` 映射回 pre-v1 路径，不再把旧 `/api/status` 拼成
+`/api/v1/node` 的形状，`backendView` 也不再有 `legacy` 字段。
 
-- 新 runtime 路径映射到 `/api/status`、`/api/start`、`/api/stop`、`/api/restart`，runtime 日志映射到旧 `/logs`。
-- 新 jobs 的单任务状态、启动、停止及训练校验，映射到旧 `/api/tuning/*`、`/api/quantization/*`。请求体逐字节透传，不删除新字段；旧版不认识的字段仍由旧版返回校验错误。
-- `GET /api/v1/node` 基于旧 `/api/status` 补充 `role:"agent"`、`version:"legacy"` 和探测能力；`GET /api/v1/jobs` 汇总两个旧 status。这两处只适配读取响应，不修改 POST body。
-- 也允许在 backend 前缀下直接访问上述白名单内的旧路径及 `/logs`；不开放任意 `/api/*`。
-- 老版本没有文件浏览、GPU 指标和独立任务 SSE。对应新接口返回 `501 {"error":"unsupported",...}`；任务日志可从单任务 status 的 `logs` 字段读取，不把 runtime 的 `/logs` 冒充任务日志。
-- 不转发老版本宿主机对话框，因为老 Agent 没有远程调用限制。新对话框路径在老后端返回 501，旧对话框路径不在转发白名单中。
+探测阶梯因此只剩两级：
 
+1. `GET /api/v1/node` → `role:"agent"` 即为可驱动的节点；
+2. `GET /v1/server/status` → 裸推理服务，`kind:"inference_only"`。
+
+只回应 pre-v1 路径的主机两级都不命中，会被判为不可达并附带原因，**不会**被当成
+半残的 agent。转发白名单只有 `api/v1/` 和 `v1/` 两个前缀。
+
+解码仍然使用 `DisallowUnknownFields`。同版本部署下这是优点（字段拼写错误会立刻
+报错而不是被静默忽略）；一旦将来要支持混版本，这一条需要重新评估，见
+[未决事项](open-items.md)。
 
 ## 3. 关键 schema
 
@@ -275,7 +283,7 @@ loading on "…" is refused`），runtime/tuning/quantization/`runtime/load` 四
 
 ## 6. 构建注意
 
-- 包已拆为多文件（`main.go` / `request_types.go` / `api.go` / `backends.go` / `legacy.go` / `fsbrowse.go` / `metrics*.go` / `devices.go`），构建/运行命令用包路径：`go build .` / `go run .`，不能再 `go build main.go`。
+- 包已拆为多文件（`main.go` / `request_types.go` / `api.go` / `backends.go` / `fsbrowse.go` / `metrics*.go` / `devices.go`），构建/运行命令用包路径：`go build .` / `go run .`，不能再 `go build main.go`。
 - Linux 启用 NVML 需要 `CGO_ENABLED=1 go build .`（只需 gcc 与 libdl，不需要 CUDA toolkit）；`CGO_ENABLED=0` 构建可用，metrics 走 available=false 分支。macOS/Windows 构建不受影响（NVML 文件带 `//go:build linux && cgo` 约束）。
 
 ## 7. 请求体与进程状态完整参考
@@ -408,7 +416,7 @@ MiSS 请求在此基础上改 `method:"miss"`，补 `rank:16`、`alpha:16`、`ta
 | `group_size` | integer | W4A16 为 32/128；0 按 128；W8A16 不使用 |
 | `visible_devices` | string，可省略 | **已忽略**：`rwkv_quantize` 为纯 CPU 工具（`tools/CMakeLists.txt` 不链接 `rwkv::backend`），Agent 不做 `--card` 校验、不采样显存、不注入 `CUDA_VISIBLE_DEVICES`。字段保留仅为兼容仍在发送它的客户端 |
 
-量化不占显卡，因此也不参与 runtime↔training 的同卡互斥。启动成功为 `200 {"ok":true}`。训练/量化的 `POST /api/v1/jobs/{id}/stop` 成功为 **HTTP 200 空响应体**，不要无条件 `response.json()`；旧版 Agent 返回体可能不同，应允许空体或成功 JSON。
+量化不占显卡，因此也不参与 runtime↔training 的同卡互斥。启动成功为 `200 {"ok":true}`。训练/量化的 `POST /api/v1/jobs/{id}/stop` 成功为 **HTTP 200 空响应体**，不要无条件 `response.json()`。
 
 ### ProcessStatus 与 RuntimeState
 
@@ -459,6 +467,6 @@ type RuntimeState = ProcessStatus & {
 | `POST /api/v1/node/dialog/file` / `directory` | 无 | `{"path":"..."}`；取消时可能为空串 |
 | `POST /api/v1/node/dialog/reveal` | 无 | `{"ok":true}`，打开最近 checkpoint 所在目录，不接受任意 path |
 
-`BackendView` 字段见 §3，并包含 `legacy:boolean`。`kind` 探测成功为 `agent` / `inference_only`；未探测或失败时可为 `""`。`last_probe` 为 Unix 秒，0 表示未探测；探测结果只存在内存中。Client 启动后每 30 秒对全部后端重跑展示型探测（I3：结果只用于显示，从不作门控），`reachable` 与 `last_probe` 随之刷新。新增后端会先保存配置，再探测，HTTP 200 并不保证 `reachable:true`。没有编辑/更新后端的接口；改 token 或地址需删除再注册，ID 会变化。`local` 不能删除。
+`BackendView` 字段见 §3。`kind` 探测成功为 `agent` / `inference_only`；未探测或失败时可为 `""`。`last_probe` 为 Unix 秒，0 表示未探测；探测结果只存在内存中。Client 启动后每 30 秒对全部后端重跑展示型探测（I3：结果只用于显示，从不作门控），`reachable` 与 `last_probe` 随之刷新。新增后端会先保存配置，再探测，HTTP 200 并不保证 `reachable:true`。没有编辑/更新后端的接口；改 token 或地址需删除再注册，ID 会变化。`local` 不能删除。
 
 完整联调流程、错误码、同源约束、第三方 SDK、非 `/v1` 原生路径的转发限制，见 [联调指南](integration-guide.md)。

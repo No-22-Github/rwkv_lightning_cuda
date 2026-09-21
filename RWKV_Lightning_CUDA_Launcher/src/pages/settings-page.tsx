@@ -119,7 +119,10 @@ export function SettingsPage() {
             </Field>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label={t("settings.currentNode")} hint={t("settings.nodeHint")}>
+            <Field
+              label={t("settings.currentNode")}
+              hint={t("settings.nodeHint")}
+            >
               <Select
                 value={backendId}
                 onChange={(event) =>
@@ -130,13 +133,15 @@ export function SettingsPage() {
                 {list.map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.name} ·{" "}
-                    {backendKindLabel(item.kind, item.legacy) ||
-                      t("backend.kind.unknown")}
+                    {backendKindLabel(item.kind) || t("backend.kind.unknown")}
                   </option>
                 ))}
               </Select>
             </Field>
-            <Field label={t("settings.agentToken")} hint={t("backend.tokenHint")}>
+            <Field
+              label={t("settings.agentToken")}
+              hint={t("backend.tokenHint")}
+            >
               <Input
                 type="password"
                 autoComplete="off"

@@ -74,14 +74,10 @@ func TestClientOnlyRole(t *testing.T) {
 			t.Fatalf("%s: %d %s", path, code, raw)
 		}
 	}
-	// The legacy status surface stays 200 for the old WebUI, with a role
-	// marker so probing never mistakes a Client for an old Agent.
-	code, body, raw := callJSON(t, h, "GET", "http://127.0.0.1:10721/api/status", nil, nil)
-	if code != 200 || body["role"] != "client" || body["available"] != false {
-		t.Fatalf("status alias: %d %s", code, raw)
-	}
-	code, body, raw = callJSON(t, h, "POST", "http://127.0.0.1:10721/api/start", strings.NewReader(`{}`), nil)
-	if code != 400 || !strings.Contains(fmt.Sprint(body["error"]), "client-only") {
+	// Control actions answer the same way, so a Client is never probe-
+	// classifiable as an Agent on any path.
+	code, body, raw := callJSON(t, h, "POST", "http://127.0.0.1:10721/api/v1/runtime/start", strings.NewReader(`{}`), nil)
+	if code != 404 || body["error"] != "client_only" {
 		t.Fatalf("start in client form: %d %s", code, raw)
 	}
 	if l.role() != "client" || len(l.capabilities()) != 0 {
@@ -133,19 +129,18 @@ func TestCapabilitiesAndNodePayload(t *testing.T) {
 	if _, ok := body["visible_devices"]; !ok {
 		t.Fatalf("node payload missing visible_devices: %s", raw)
 	}
-	// The legacy alias shares the same implementation (fields are a
-	// superset, never a second shape).
-	_, alias, _ := callJSON(t, l.handler(), "GET", "http://127.0.0.1:10721/api/status", nil, nil)
-	for _, k := range []string{"status", "running", "config", "base_url", "backend"} {
-		if _, ok := alias[k]; k != "backend" && !ok {
-			t.Fatalf("alias missing %s: %v", k, alias)
+	// /api/v1/node is a superset of the RuntimeState /api/v1/runtime reports:
+	// one shape, never a second one that can drift.
+	for _, k := range []string{"status", "running", "config", "base_url"} {
+		if _, ok := body[k]; !ok {
+			t.Fatalf("node payload missing %s: %s", k, raw)
 		}
 	}
 }
 
-func TestJobsAliasesShareHandlers(t *testing.T) {
-	// The /api/v1 paths answer 404 in client-only form; to compare alias
-	// and new path directly the launcher must run in agent form.
+func TestJobsCollectionAndItems(t *testing.T) {
+	// The /api/v1 paths answer 404 in client-only form, so the launcher must
+	// run in agent form.
 	bin := backendExecutable()
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
@@ -154,11 +149,7 @@ func TestJobsAliasesShareHandlers(t *testing.T) {
 
 	l := newLauncher()
 	h := l.handler()
-	_, tuning, _ := callJSON(t, h, "GET", "http://127.0.0.1:10721/api/tuning/status", nil, nil)
 	_, job, raw := callJSON(t, h, "GET", "http://127.0.0.1:10721/api/v1/jobs/tuning", nil, nil)
-	if fmt.Sprint(tuning) != fmt.Sprint(job) {
-		t.Fatalf("alias and /api/v1 disagree: %v vs %v (%s)", tuning, job, raw)
-	}
 	if job["miss_available"] == nil {
 		t.Fatalf("miss_available lost: %s", raw)
 	}
@@ -223,10 +214,11 @@ func TestDialogUnsupportedForRemoteCallers(t *testing.T) {
 	}
 }
 
-// The old WebUI's own endpoints went with it. The pre-/api/v1 *control*
-// aliases stay: they serve third-party callers and an older Client, whose
-// probe ladder identifies an agent by GET /api/status.
-func TestWebUIOnlyAliasesAreGone(t *testing.T) {
+// No pre-/api/v1 path survives. The old WebUI is gone, and so is
+// mixed-version support: this launcher speaks one protocol, and an unknown
+// /api path answers JSON 404 rather than falling through to the static
+// handler's text 404.
+func TestPreV1SurfaceIsGone(t *testing.T) {
 	for _, path := range []string{backendExecutable(), toolBinary("rwkv_state_tune")} {
 		if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
 			t.Fatal(err)
@@ -236,14 +228,28 @@ func TestWebUIOnlyAliasesAreGone(t *testing.T) {
 	l := newLauncher()
 	h := l.handler()
 
-	// Host dialogs were reachable only from the local page: legacyRoutes
-	// deliberately never forwarded them to a remote agent.
-	for _, path := range []string{"/api/pick-file", "/api/pick-directory", "/api/tuning/open-folder"} {
-		code, body, raw := callJSON(t, h, "POST", "http://127.0.0.1:10721"+path, nil, nil)
+	for _, c := range []struct{ method, path string }{
+		{"GET", "/api/status"},
+		{"POST", "/api/start"},
+		{"POST", "/api/stop"},
+		{"POST", "/api/restart"},
+		{"POST", "/api/pick-file"},
+		{"POST", "/api/pick-directory"},
+		{"GET", "/api/tuning/status"},
+		{"POST", "/api/tuning/validate"},
+		{"POST", "/api/tuning/start"},
+		{"POST", "/api/tuning/stop"},
+		{"POST", "/api/tuning/open-folder"},
+		{"GET", "/api/quantization/status"},
+		{"POST", "/api/quantization/start"},
+		{"POST", "/api/quantization/stop"},
+	} {
+		code, body, raw := callJSON(t, h, c.method, "http://127.0.0.1:10721"+c.path, nil, nil)
 		if code != 404 || body["error"] != "not found" {
-			t.Fatalf("%s should be gone: %d %s", path, code, raw)
+			t.Fatalf("%s %s should be gone: %d %s", c.method, c.path, code, raw)
 		}
 	}
+
 	// /logs is replaced by /api/v1/runtime/logs. Nothing serves it now, so it
 	// falls through to the static handler rather than to an SSE stream.
 	r := httptest.NewRequest("GET", "http://127.0.0.1:10721/logs", nil)
@@ -253,18 +259,15 @@ func TestWebUIOnlyAliasesAreGone(t *testing.T) {
 		t.Fatalf("/logs still streams: %s", ct)
 	}
 
-	// The control aliases still answer, and still share their handlers.
-	code, body, raw := callJSON(t, h, "GET", "http://127.0.0.1:10721/api/status", nil, nil)
-	if code != 200 || body["role"] != "agent" {
-		t.Fatalf("/api/status must keep identifying this node: %d %s", code, raw)
-	}
-	for _, path := range []string{"/api/tuning/status", "/api/quantization/status"} {
-		if code, _, raw := callJSON(t, h, "GET", "http://127.0.0.1:10721"+path, nil, nil); code != 200 {
-			t.Fatalf("%s: %d %s", path, code, raw)
+	// The v1 replacements all answer.
+	for _, c := range []struct{ method, path string }{
+		{"GET", "/api/v1/node"},
+		{"GET", "/api/v1/runtime"},
+		{"GET", "/api/v1/jobs/tuning"},
+		{"POST", "/api/v1/node/dialog/file"},
+	} {
+		if code, _, raw := callJSON(t, h, c.method, "http://127.0.0.1:10721"+c.path, nil, nil); code == 404 {
+			t.Fatalf("%s %s must still exist: %s", c.method, c.path, raw)
 		}
-	}
-	// The v1 dialog endpoints are the supported replacement.
-	if code, _, raw := callJSON(t, h, "POST", "http://127.0.0.1:10721/api/v1/node/dialog/file", nil, nil); code == 404 {
-		t.Fatalf("the v1 dialog route must still exist: %s", raw)
 	}
 }

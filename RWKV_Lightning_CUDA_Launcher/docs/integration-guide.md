@@ -51,7 +51,6 @@ curl -sS "$CLIENT_URL/api/v1/backends" \
   "base_url": "http://server:18766",
   "has_token": true,
   "kind": "agent",
-  "legacy": false,
   "capabilities": ["runtime", "tuning_state", "quantization", "metrics", "fs"],
   "reachable": true,
   "last_probe": 1790000000,

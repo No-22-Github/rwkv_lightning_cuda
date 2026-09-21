@@ -1,6 +1,6 @@
 package main
 
-// Request bodies shared by the versioned control plane and legacy aliases.
+// Request bodies for the /api/v1 control plane.
 // Keep JSON field names aligned with docs/control-plane-api.md.
 // VisibleDevices is a pointer: omitted and explicitly empty have different semantics.
 

@@ -1,9 +1,9 @@
 package main
 
-// HTTP surface: the /api/v1 control plane plus the legacy /api/* aliases.
-// Aliases never duplicate logic — each one dispatches to the same handler as
-// its new path (§ compatibility: two implementations would drift apart on
-// the next field change).
+// HTTP surface: the /api/v1 control plane. The pre-v1 /api/* aliases and the
+// legacy-agent forwarding adapter are gone — this launcher speaks one
+// protocol version, and a node that does not speak it is not a node it can
+// drive (probeBackend still classifies such a host as inference_only).
 
 import (
 	"crypto/subtle"
@@ -19,20 +19,6 @@ import (
 	"runtime"
 	"strings"
 )
-
-// api registers a legacy-style route: explicit method check with a JSON 405
-// and errors wrapped as JSON 400, preserving the pre-control-plane contract.
-func api(mux *http.ServeMux, pattern, method string, f func(http.ResponseWriter, *http.Request) error) {
-	mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != method {
-			writeJSON(w, 405, map[string]any{"error": "method not allowed"})
-			return
-		}
-		if err := f(w, r); err != nil {
-			writeJSON(w, 400, map[string]any{"error": err.Error()})
-		}
-	})
-}
 
 // apiV1 registers a /api/v1 route with the method embedded in the pattern
 // (Go 1.22 ServeMux); handler errors still map to JSON 400.
@@ -212,43 +198,6 @@ func (l *launcher) handler() http.Handler {
 	apiV1(mux, "POST /api/v1/backends/{id}/probe", l.handleBackendsProbe)
 	mux.HandleFunc("/api/v1/backends/{id}/{rest...}", l.handleForward)
 
-	// ---- Legacy aliases ----
-	// These are the pre-/api/v1 control paths, kept for two callers that are
-	// NOT the old WebUI: third-party scripts, and an older Client whose probe
-	// ladder identifies an agent by GET /api/status. They dispatch to the same
-	// handlers as their /api/v1 twins — two implementations would drift apart
-	// on the next field change.
-	//
-	// The WebUI-only aliases are gone with the WebUI that used them: the host
-	// dialogs (/api/pick-file, /api/pick-directory, /api/tuning/open-folder),
-	// which legacyRoutes deliberately never forwarded to a remote agent and so
-	// had no caller but the local page, and /logs, replaced by
-	// /api/v1/runtime/logs. Forwarding to a *legacy agent* still maps onto
-	// that agent's own /logs — see legacyRoutes.
-	api(mux, "/api/status", "GET", func(w http.ResponseWriter, r *http.Request) error {
-		writeJSON(w, 200, l.statusAliasPayload())
-		return nil
-	})
-	api(mux, "/api/start", "POST", func(w http.ResponseWriter, r *http.Request) error { return l.runtimeAction("start", w, r) })
-	api(mux, "/api/stop", "POST", func(w http.ResponseWriter, r *http.Request) error { return l.runtimeAction("stop", w, r) })
-	api(mux, "/api/restart", "POST", func(w http.ResponseWriter, r *http.Request) error { return l.runtimeAction("restart", w, r) })
-	api(mux, "/api/tuning/validate", "POST", l.handleJobValidate)
-	api(mux, "/api/tuning/status", "GET", func(w http.ResponseWriter, r *http.Request) error {
-		writeJSON(w, 200, l.tuningStatus())
-		return nil
-	})
-	api(mux, "/api/tuning/start", "POST", l.handleTuningStart)
-	api(mux, "/api/tuning/stop", "POST", func(w http.ResponseWriter, r *http.Request) error {
-		return l.jobStop(l.tuning)
-	})
-	api(mux, "/api/quantization/status", "GET", func(w http.ResponseWriter, r *http.Request) error {
-		writeJSON(w, 200, l.quantizationStatus())
-		return nil
-	})
-	api(mux, "/api/quantization/start", "POST", l.handleQuantizationStart)
-	api(mux, "/api/quantization/stop", "POST", func(w http.ResponseWriter, r *http.Request) error {
-		return l.jobStop(l.quantization)
-	})
 	mux.HandleFunc("/v1/", l.proxy)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -356,8 +305,7 @@ func (l *launcher) handleDialogReveal(w http.ResponseWriter, r *http.Request) er
 	return nil
 }
 
-// runtimeAction is the shared body of start/stop/restart for both the legacy
-// paths and /api/v1/runtime/*.
+// runtimeAction is the shared body of /api/v1/runtime/{start,stop,restart}.
 func (l *launcher) runtimeAction(action string, w http.ResponseWriter, r *http.Request) error {
 	if action != "stop" && l.role() == "client" {
 		return errors.New("client-only launcher: this host has no local runtime to manage")
@@ -399,12 +347,8 @@ func (l *launcher) runtimeAction(action string, w http.ResponseWriter, r *http.R
 }
 
 func (l *launcher) handleJobValidate(w http.ResponseWriter, r *http.Request) error {
-	if l.role() == "client" {
-		if l.isV1(r) {
-			writeJSON(w, 404, map[string]any{"error": "client_only", "reason": "no local runtime agent on this host"})
-			return nil
-		}
-		return errors.New("client-only launcher: this host has no local training tools")
+	if !l.agentGate(w) {
+		return nil
 	}
 	var req struct {
 		Path string `json:"path"`
@@ -422,12 +366,8 @@ func (l *launcher) handleJobValidate(w http.ResponseWriter, r *http.Request) err
 }
 
 func (l *launcher) handleTuningStart(w http.ResponseWriter, r *http.Request) error {
-	if l.role() == "client" {
-		if l.isV1(r) {
-			writeJSON(w, 404, map[string]any{"error": "client_only", "reason": "no local runtime agent on this host"})
-			return nil
-		}
-		return errors.New("client-only launcher: this host has no local training tools")
+	if !l.agentGate(w) {
+		return nil
 	}
 	var req tuneRequest
 	if e := decode(w, r, &req); e != nil {
@@ -472,12 +412,8 @@ func (l *launcher) handleTuningStart(w http.ResponseWriter, r *http.Request) err
 }
 
 func (l *launcher) handleQuantizationStart(w http.ResponseWriter, r *http.Request) error {
-	if l.role() == "client" {
-		if l.isV1(r) {
-			writeJSON(w, 404, map[string]any{"error": "client_only", "reason": "no local runtime agent on this host"})
-			return nil
-		}
-		return errors.New("client-only launcher: this host has no local quantization tools")
+	if !l.agentGate(w) {
+		return nil
 	}
 	var req quantizeRequest
 	if e := decode(w, r, &req); e != nil {
@@ -590,7 +526,7 @@ func (l *launcher) backendView(e backendEntry) backendView {
 	}
 	return backendView{
 		ID: e.ID, Name: e.Name, BaseURL: e.BaseURL, HasToken: e.Token != "",
-		Legacy: p.Legacy, Kind: p.Kind, Capabilities: caps, Reachable: p.Reachable,
+		Kind: p.Kind, Capabilities: caps, Reachable: p.Reachable,
 		LastProbe: p.LastProbe, ProbeError: p.ProbeError,
 	}
 }
@@ -598,12 +534,15 @@ func (l *launcher) backendView(e backendEntry) backendView {
 func (l *launcher) handleForward(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	rest := r.PathValue("rest")
-	if !(strings.HasPrefix(rest, "api/v1/") || strings.HasPrefix(rest, "v1/") || isLegacyForwardPath(r.Method, rest)) {
+	// Only the two documented surfaces forward: the control plane and the
+	// OpenAI-compatible inference API. Everything else is refused here rather
+	// than handed to a remote host.
+	if !strings.HasPrefix(rest, "api/v1/") && !strings.HasPrefix(rest, "v1/") {
 		writeJSON(w, 404, map[string]any{"error": "unsupported forward path"})
 		return
 	}
 	if e, ok := l.backends.lookup(id); ok {
-		l.forwardRegisteredBackend(w, r, e, rest)
+		forwardToBackend(w, r, e, rest)
 		return
 	}
 	if e, isLocal := l.localBackend(); isLocal && id == "local" {
@@ -611,10 +550,4 @@ func (l *launcher) handleForward(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 404, map[string]any{"error": "unknown backend"})
-}
-
-// isV1 reports whether the request hit a /api/v1 path (used to pick 404
-// instead of 400 for client-only forms on the new surface).
-func (l *launcher) isV1(r *http.Request) bool {
-	return strings.HasPrefix(r.URL.Path, "/api/v1/")
 }

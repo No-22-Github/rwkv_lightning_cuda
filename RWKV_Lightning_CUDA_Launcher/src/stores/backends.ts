@@ -156,9 +156,9 @@ export function backendLabel(
 }
 
 /** Human-facing label for a probed backend. */
-export function backendKindLabel(kind: BackendView["kind"], legacy: boolean) {
+export function backendKindLabel(kind: BackendView["kind"]) {
   if (kind === "inference_only") return "inference";
-  if (kind === "agent") return legacy ? "legacy" : "agent";
+  if (kind === "agent") return "agent";
   return "";
 }
 

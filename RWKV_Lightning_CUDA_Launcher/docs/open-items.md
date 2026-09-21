@@ -1,59 +1,35 @@
 # 未决事项
 
 一次 launcher review 之后留下的待办。已修的不在这里——那些在 git log 里。
-每条都记了**为什么还没做**，因为其中几条不是"没空写"，是缺一个部署层面的决定。
+每条都记了**为什么还没做**：有的是要权衡，有的是缺实机环境，有的是改动风险
+大于收益。开头先记已经做出的决定，免得日后有人把它们当成"忘了做"。
 
-## 需要先做决定
+## 已经决定的
 
-### 1. 旧 `/api/*` 控制面 alias 要不要移除
+**混版本不再支持。** Client 与 Agent 必须同版本部署，这是一次干净起步的取舍。
+据此已经移除：pre-v1 的 `/api/*` alias 全套、`legacy.go` 的旧协议转发适配、
+`probeResult` / `backendView` 的 `legacy` 字段，探测阶梯从三级降到两级
+（`/api/v1/node` → `/v1/server/status`）。
 
-`api.go` 里这些 alias 仍在：`/api/status`、`/api/start`、`/api/stop`、
-`/api/restart`、`/api/tuning/{status,validate,start,stop}`、
-`/api/quantization/{status,start,stop}`。它们和 `/api/v1` 的孪生路径共用同一个
-handler，没有第二套实现。
+留下的后果，日后要回退得先掂量：
 
-旧 WebUI 已经移除，但**这些 alias 的调用方不是它**：
+- **只说 pre-v1 协议的主机不再被识别成节点**，会落到"不可达"。这是有意的——
+  它不是这个 Client 能驱动的东西。
+- **`DisallowUnknownFields` 保持严格**。同版本部署下这是优点：字段拼写错误立刻
+  报错，而不是被静默忽略。真要重新支持混版本，这一条得先松开，而且**加字段
+  会立刻打破新 Client → 旧 Agent**，没有缓冲。已知计划里的统一版本号如果落地，
+  应该在那时一起决定放宽策略。
 
-- 第三方脚本；
-- **旧版 Client**：`probeBackend` 的探测阶梯第二级就是 `GET /api/status`
-  （`backends.go:276`）。删掉它，旧 Client 会完全探测不到新 Agent——它不认识
-  `/api/v1/node`，阶梯会一路掉到 `/v1/server/status`，把一个完整的 Agent
-  误判成 `inference_only`。
-
-所以这是一个**跨版本部署**的决定，不是清理死代码。要移除，先回答：
-是否还存在、以及要支持多久「旧 Client + 新 Agent」的混版本组合。
-
-### 2. `legacy.go` 的去留
-
-整个文件是「本机 Client → 远端**旧版 Agent**」的转发适配（`legacyRoutes` 把
-`/api/v1/*` 映射回旧路径，`forwardLegacySummary` 把旧 `/api/status` 拼成
-`/api/v1/node` 的形状）。和 WebUI 无关，和上一条是同一个轴：混版本组合还支不支持。
-
-注意两条独立：可以保留 `legacy.go`（能连旧 Agent）同时移除本机 alias
-（不再被旧 Client 连），反之亦然。
-
-### 3. `DisallowUnknownFields` 的跨版本策略
-
-`main.go` 的 `decode()` 拒绝未知字段。转发路径靠字节透传规避了
-（`backends.go` 顶部注释写了原因），但 `/api/v1` 直连没有缓冲：
-**以后给 `startRequest` / `tuneRequest` 加任何字段，新 Client → 旧 Agent 必定 400。**
-
-已知计划是加统一版本号。在那之前，加字段要么同时升级两端，要么先决定是否对
-`/api/v1` 放宽（例如只对已知的可选字段放行）。
-
-### 4. tune-cache 的旧缓存
-
-`deviceTuneCache()` 把 W8A16 缓存钉成 `<模型名>.dev-<tag>.w8a16.tune`，
-和 C++ 侧「模型名 + GPU 名」的默认路径对不上，所以升级后第一次启动必然
-重新调优（约几分钟，每模型每卡一次）。
-
-当前处理是**只提示不迁移**：Agent 在缓存缺失时打一行日志
-（`devices.go` 的 `tuneCacheNote`），前端选卡处和 chat 切卡处各一条提示。
-如果后来觉得几分钟也不该白等，可以加一次旧默认路径的回退读取。
+**tune-cache 只提示不迁移。** `deviceTuneCache()` 把 W8A16 缓存钉成
+`<模型名>.dev-<tag>.w8a16.tune`，和 C++ 侧「模型名 + GPU 名」的默认路径对不上，
+所以换卡后首次启动必然重新调优（约几分钟，每模型每卡一次）。当前处理是 Agent
+在缓存缺失时打一行日志（`devices.go` 的 `tuneCacheNote`），前端选卡处和 chat
+切卡处各一条提示。几分钟被认为可以接受；若后来觉得不该白等，可以加一次旧默认
+路径的回退读取。
 
 ## 已确认存在、还没修
 
-### 5. `process.sse` 的日志重放 —— `main.go`
+### 1. `process.sse` 的日志重放 —— `main.go`
 
 去重靠在缓冲区里找上一条发出去的行来定位。一旦日志滚过 2000 行上限把它挤掉，
 `start` 回落到 0，**整个缓冲区每 300ms 重发一次**。训练任务输出量大时会持续刷。
@@ -61,14 +37,14 @@ handler，没有第二套实现。
 **这是上游原样代码**（对过 `ddfed89`，一字未改），所以不算本次引入。改它有破坏
 旧客户端的风险，建议单独开一条：换成单调递增的序号游标，而不是按内容找锚点。
 
-### 6. 轮询没有 in-flight 保护 —— `src/app/App.tsx`
+### 2. 轮询没有 in-flight 保护 —— `src/app/App.tsx`
 
 `refresh` 1.6s 一次，超时 6s（`stores/nodes.ts`），Agent 侧 `status()` 还会做一次
 1.5s 的本地探测。节点慢的时候每个节点会叠到 3–4 个在飞的请求。标签页隐藏时也
 不暂停。加个 in-flight 标志 + `document.visibilityState` 门控很便宜，但属于性能
 调优，不适合和 bugfix 混在一起。
 
-### 7. ROCm 字段名未经实机验证 —— `metrics.go`
+### 3. ROCm 字段名未经实机验证 —— `metrics.go`
 
 `rocmSampleUncached` 按后缀匹配 `rocm-smi --json` 的键，文件里自己标了
 T1（W7900 实机验证）仍未完成。`rocmNumber` 对匹配不上的键返回 0——
@@ -91,8 +67,9 @@ T1（W7900 实机验证）仍未完成。`rocmNumber` 对匹配不上的键返�
 视觉验收，Go 单测不等于真实 GPU 行为。**以下都还没有实机验收**：
 
 - 多卡自动放置与 `--card` 钉定的实际效果；
-- AMD / ROCm 路径的全部字段（见第 7 条）；
-- 跨机器的 Client ↔ Agent 部署（转发、token、SSE 穿透）；
+- AMD / ROCm 路径的全部字段（见第 3 条）；
+- 跨机器的 Client ↔ Agent 部署（转发、token、SSE 穿透）——现在还多一条：
+  两端必须同版本，混版本会表现为节点探测不到，而不是功能降级；
 - 冷加载期间的 Stop/Restart —— 本次修了门控逻辑并有单测，但没在真机上按过按钮。
 
 另外注意 zustand 在 `renderToStaticMarkup` 下走 `getServerSnapshot`，返回的是

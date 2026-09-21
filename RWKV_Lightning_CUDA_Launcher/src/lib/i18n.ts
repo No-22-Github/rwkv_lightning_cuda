@@ -85,10 +85,8 @@ const zh = {
   "backend.capabilities": "能力",
   "backend.noCapabilities": "尚未探测能力",
   "backend.kind.agent": "agent",
-  "backend.kind.legacy": "legacy agent",
   "backend.kind.inference": "裸推理",
   "backend.kind.unknown": "未探测",
-  "backend.legacyBadge": "旧协议",
   "backend.version": "版本",
   "backend.added": "已添加 {name}",
   "backend.addedUnreachable": "已添加 {name}，但探测未通过：{error}",
@@ -155,7 +153,7 @@ const zh = {
   "runtime.devicePinnedHint":
     "launcher 以 --card {card} 启动，只能使用该卡，其他选卡会被拒绝。",
   "runtime.deviceNoMetricsHint":
-    "读不到 GPU 列表（旧版 Agent 或无指标），手动填写选卡串，如 0 或 0,1。",
+    "读不到 GPU 列表（该节点未提供指标），手动填写选卡串，如 0 或 0,1。",
   "runtime.deviceHint":
     "自动模式由 Agent 决定选卡（结果记录在日志里）；指定模式从下拉框选卡。launcher 以 --card 启动时，该卡是唯一允许的选择。",
   "runtime.deviceRetuneHint":
@@ -177,7 +175,6 @@ const zh = {
   "runtime.gpuNoMetrics": "无 GPU 指标",
   "runtime.gpuReason.inference": "裸推理节点：没有 Agent 指标能力。",
   "runtime.gpuReason.unreachable": "节点不可达，指标暂无。",
-  "runtime.gpuReason.legacy": "旧版 Agent 不提供 GPU 指标（501）。",
   "runtime.gpuReason.unknown": "指标不可用。",
   "runtime.logs": "运行日志",
   "runtime.logsEmpty": "暂无日志输出。启动 runtime 后这里会实时刷新。",
@@ -508,10 +505,8 @@ const en: Record<MessageKey, string> = {
   "backend.capabilities": "Capabilities",
   "backend.noCapabilities": "Capabilities not probed yet",
   "backend.kind.agent": "agent",
-  "backend.kind.legacy": "legacy agent",
   "backend.kind.inference": "inference",
   "backend.kind.unknown": "unprobed",
-  "backend.legacyBadge": "legacy protocol",
   "backend.version": "Version",
   "backend.added": "Added {name}",
   "backend.addedUnreachable": "Added {name}, but the probe failed: {error}",
@@ -579,7 +574,7 @@ const en: Record<MessageKey, string> = {
   "runtime.devicePinnedHint":
     "The launcher was started with --card {card}; only this card is allowed and other picks are refused.",
   "runtime.deviceNoMetricsHint":
-    "The GPU list is unavailable (legacy agent or no metrics) — type a spec like 0 or 0,1.",
+    "The GPU list is unavailable (this node reports no metrics) — type a spec like 0 or 0,1.",
   "runtime.deviceHint":
     "Auto lets the Agent choose the card (the choice is logged); Explicit picks one from the dropdown. With --card at launcher startup, that card is the only allowed choice.",
   "runtime.deviceRetuneHint":
@@ -603,7 +598,6 @@ const en: Record<MessageKey, string> = {
   "runtime.gpuReason.inference":
     "Inference-only node: no Agent metrics capability.",
   "runtime.gpuReason.unreachable": "Node unreachable — no metrics.",
-  "runtime.gpuReason.legacy": "Legacy agent does not expose metrics (501).",
   "runtime.gpuReason.unknown": "Metrics unavailable.",
   "runtime.logs": "Runtime logs",
   "runtime.logsEmpty":

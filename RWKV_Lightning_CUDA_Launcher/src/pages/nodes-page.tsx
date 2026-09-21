@@ -150,7 +150,7 @@ export function NodesPage() {
                     </div>
                   </div>
                   <Badge>
-                    {backendKindLabel(backend.kind, backend.legacy) ||
+                    {backendKindLabel(backend.kind) ||
                       t("backend.kind.unknown")}
                   </Badge>
                 </CardHeader>
