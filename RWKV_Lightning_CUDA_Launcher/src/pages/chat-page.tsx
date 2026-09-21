@@ -90,7 +90,9 @@ export function ChatPage() {
           )}
         </div>
 
-        <div className="px-5 pb-4.5">
+        {/* Same 720px column as the transcript above, so the composer lines
+            up with the bubbles instead of spanning the full pane. */}
+        <div className="mx-auto w-full max-w-[720px] px-5 pb-4.5">
           <Composer
             backendId={backendId}
             disabled={disabled}

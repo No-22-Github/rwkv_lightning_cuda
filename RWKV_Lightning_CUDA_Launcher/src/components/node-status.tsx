@@ -1,7 +1,7 @@
 import { Cpu } from "lucide-react";
 import { Badge, StatusDot, type StatusTone } from "@/components/ui/badge";
 import { Notice } from "@/components/ui/primitives";
-import { formatGigabytes, percent } from "@/lib/format";
+import { formatGigabytePair, percent } from "@/lib/format";
 import type { MessageKey } from "@/lib/i18n";
 import type {
   BackendView,
@@ -87,7 +87,13 @@ export function modelName(runtime?: RuntimeState) {
     if (model.loaded === false) return "";
     return model.name || model.id || model.path || "";
   }
-  const path = runtime?.config?.model_path;
+  // `config.model_path` is only what the process was *asked* to load, never
+  // proof that something is serving it. Reporting it unconditionally is what
+  // let an offline node render "runtime offline" and a loaded model name side
+  // by side; the mockup shows "—" for that node instead. Fall back to the
+  // configured path only while the runtime is actually up.
+  if (runtime?.status !== "ready") return "";
+  const path = runtime.config?.model_path;
   if (!path) return "";
   return path.replace(/[/\\]+$/, "").split(/[/\\]/).pop() ?? "";
 }
@@ -137,9 +143,8 @@ export function GpuCard({ gpu }: { gpu: GpuMetric }) {
             style={{ width: `${used}%` }}
           />
         </div>
-        <span className="shrink-0 font-mono text-[11.5px] whitespace-nowrap text-muted-foreground">
-          {formatGigabytes(gpu.memory_used_bytes)} /{" "}
-          {formatGigabytes(gpu.memory_total_bytes)}
+        <span className="shrink-0 font-mono text-[11.5px] whitespace-nowrap tabular-nums text-muted-foreground">
+          {formatGigabytePair(gpu.memory_used_bytes, gpu.memory_total_bytes)}
         </span>
       </div>
       <div className="mt-1.5 flex items-center gap-2 text-[11.5px] text-muted-foreground">
@@ -182,12 +187,19 @@ export function GpuMiniRows({ metrics }: { metrics: MetricsResponse }) {
                 style={{ width: `${used}%` }}
               />
             </div>
-            <div className="mt-1 flex justify-between font-mono text-[10px] text-muted-foreground">
-              <span>
-                {formatGigabytes(gpu.memory_used_bytes)} /{" "}
-                {formatGigabytes(gpu.memory_total_bytes)}
+            {/* Both halves must stay on one line: ~158px of usable width in
+                the rail leaves no room to wrap, and a wrapped row grows the
+                card until it runs off the bottom of the viewport. nowrap +
+                the single-unit pair keeps the worst case (3-digit watts on a
+                100%-busy card) inside the box. */}
+            <div className="mt-1 flex justify-between gap-1.5 font-mono text-[10px] whitespace-nowrap tabular-nums text-muted-foreground">
+              <span className="truncate">
+                {formatGigabytePair(
+                  gpu.memory_used_bytes,
+                  gpu.memory_total_bytes,
+                )}
               </span>
-              <span>
+              <span className="shrink-0">
                 {gpu.temperature_c !== undefined
                   ? `${gpu.temperature_c}°C`
                   : "—"}{" "}

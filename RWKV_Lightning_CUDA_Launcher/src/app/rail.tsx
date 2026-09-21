@@ -27,7 +27,7 @@ import { applyDevice } from "@/lib/api/launcher";
 import { useI18n, type MessageKey } from "@/lib/i18n";
 import { navigate, useRoute, type Route } from "@/lib/router";
 import { cn } from "@/lib/utils";
-import { useRuntimeForm } from "@/stores/forms";
+import { useRuntimeFormEntry } from "@/stores/forms";
 import { useBackends } from "@/stores/backends";
 import { useNodes } from "@/stores/nodes";
 import { toast, useRail } from "@/stores/ui";
@@ -173,8 +173,7 @@ function CollapsedFooter() {
   const { t } = useI18n();
   const { backendId, backend, runtime, metrics, metricsError, hasAgent, busy } =
     useCurrent();
-  const form = useRuntimeForm((s) => s.config);
-  const devices = useRuntimeForm((s) => s.devices);
+  const { config: form, devices } = useRuntimeFormEntry(backendId);
   const start = useNodes((s) => s.startRuntime);
   const stop = useNodes((s) => s.stopRuntime);
   const restart = useNodes((s) => s.restartRuntime);

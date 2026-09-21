@@ -463,3 +463,35 @@ it("allows arbitrary positive learning-rate decimals in the tuning form", async 
   expect(html).toContain('value="0.0005"');
   expect(html).toContain('value="0.0001"');
 });
+
+describe("GPU memory formatting", () => {
+  it("spells the unit once so the rail row fits on one line", async () => {
+    const { formatGigabytePair } = await import("../src/lib/format");
+    const GiB = 1024 ** 3;
+    // The 216px rail card leaves ~158px for this row plus the temp/power
+    // pair; "61.5 GB / 95.6 GB" overflowed it and wrapped both halves.
+    expect(formatGigabytePair(61.5 * GiB, 95.6 * GiB)).toBe("61.5 / 95.6 GB");
+    expect(formatGigabytePair(0.6 * GiB, 95.6 * GiB)).toBe("0.6 / 95.6 GB");
+  });
+
+  it("reports an em dash when either side is missing", async () => {
+    const { formatGigabytePair } = await import("../src/lib/format");
+    expect(formatGigabytePair(undefined, 1024 ** 3)).toBe("—");
+    expect(formatGigabytePair(1024 ** 3, null)).toBe("—");
+    expect(formatGigabytePair(NaN, 1024 ** 3)).toBe("—");
+  });
+});
+
+describe("loaded model reporting", () => {
+  it("does not present a configured path as a loaded model", async () => {
+    const { modelName } = await import("../src/components/node-status");
+    const config = { model_path: "/models/rwkv-g1k-7b.pth" };
+    // Offline node: the mockup shows "—", not the path it was asked to load.
+    expect(
+      modelName({ status: "offline", config } as never),
+    ).toBe("");
+    expect(modelName({ status: "ready", config } as never)).toBe(
+      "rwkv-g1k-7b.pth",
+    );
+  });
+});

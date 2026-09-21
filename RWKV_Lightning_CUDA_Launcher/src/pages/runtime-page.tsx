@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { HardDrive, Info, Loader2, MonitorPlay } from "lucide-react";
 import { useCurrent } from "@/app/use-current";
 import { PageHeader, PathField } from "@/components/common";
@@ -13,9 +13,9 @@ import { Input, MonoInput } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Notice } from "@/components/ui/primitives";
 import { inferenceApi } from "@/lib/api/inference";
-import type { DeviceSelection } from "@/lib/api/types";
+import type { DeviceSelection, RuntimeConfig } from "@/lib/api/types";
 import { useI18n } from "@/lib/i18n";
-import { useRuntimeForm } from "@/stores/forms";
+import { useRuntimeForm, useRuntimeFormEntry } from "@/stores/forms";
 import { useLogs, useLogStream } from "@/stores/logs";
 import { useNodes } from "@/stores/nodes";
 import { toast } from "@/stores/ui";
@@ -32,10 +32,18 @@ export function RuntimePage() {
     error,
     hasAgent,
   } = useCurrent();
-  const config = useRuntimeForm((s) => s.config);
-  const devices = useRuntimeForm((s) => s.devices);
-  const set = useRuntimeForm((s) => s.set);
-  const setDevices = useRuntimeForm((s) => s.setDevices);
+  const { config, devices } = useRuntimeFormEntry(backendId);
+  const setField = useRuntimeForm((s) => s.set);
+  const setDeviceSelection = useRuntimeForm((s) => s.setDevices);
+  const seed = useRuntimeForm((s) => s.seed);
+  const set = useCallback(
+    (patch: Partial<RuntimeConfig>) => setField(backendId, patch),
+    [backendId, setField],
+  );
+  const setDevices = useCallback(
+    (selection: DeviceSelection) => setDeviceSelection(backendId, selection),
+    [backendId, setDeviceSelection],
+  );
   const logs = useLogStream(backendId, "runtime");
   const openLogs = useLogs((s) => s.open);
   const closeLogs = useLogs((s) => s.close);
@@ -51,13 +59,21 @@ export function RuntimePage() {
     return () => closeLogs(backendId, "runtime");
   }, [backendId, hasAgent, openLogs, closeLogs]);
 
-  // Adopt the running configuration once, so a page reload shows what the
-  // process is actually using. The password is never echoed by the Agent.
+  // Seed this node's form from what this node is actually running, so opening
+  // a node shows its own configuration rather than whichever node was last
+  // visited. `seed` is a no-op once the entry exists, so it never fights the
+  // user's edits. The password is never echoed by the Agent.
   useEffect(() => {
-    if (!runtime?.config) return;
-    if (config.model_path) return;
-    set({ ...runtime.config, password: config.password });
-  }, [runtime?.config, config.model_path, config.password, set]);
+    if (!backendId || !runtime?.config?.model_path) return;
+    seed(backendId, {
+      config: { ...runtime.config, password: "" },
+      // An empty `visible_devices` is indistinguishable from "unset" on the
+      // wire, so only adopt an explicit selection.
+      devices: runtime.visible_devices
+        ? { mode: "explicit", value: runtime.visible_devices }
+        : { mode: "inherit" },
+    });
+  }, [backendId, runtime?.config, runtime?.visible_devices, seed]);
 
   const dynamicReady =
     runtime?.status === "ready" && config.enable_dynamic_loading;
@@ -80,7 +96,7 @@ export function RuntimePage() {
   const inferenceOnly = backend?.kind === "inference_only";
 
   return (
-    <div className="mx-auto max-w-[1240px] px-6 pt-5.5 pb-10">
+    <div className="max-w-[1240px] px-6 pt-5.5 pb-10">
       <PageHeader
         eyebrow={backend?.name ?? "—"}
         title={t("runtime.title")}

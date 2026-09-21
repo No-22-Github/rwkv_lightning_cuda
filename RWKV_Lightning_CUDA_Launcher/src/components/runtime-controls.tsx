@@ -4,7 +4,7 @@ import { StatusPill } from "@/components/ui/badge";
 import { applyDevice } from "@/lib/api/launcher";
 import { useI18n } from "@/lib/i18n";
 import { useCurrent } from "@/app/use-current";
-import { useRuntimeForm } from "@/stores/forms";
+import { useRuntimeFormEntry } from "@/stores/forms";
 import { useNodes } from "@/stores/nodes";
 import { toast } from "@/stores/ui";
 import { runtimeLabel, runtimeTone } from "@/components/node-status";
@@ -12,8 +12,7 @@ import { runtimeLabel, runtimeTone } from "@/components/node-status";
 function useActions() {
   const { t } = useI18n();
   const { backendId, hasAgent, runtime, backend, busy } = useCurrent();
-  const form = useRuntimeForm((s) => s.config);
-  const devices = useRuntimeForm((s) => s.devices);
+  const { config: form, devices } = useRuntimeFormEntry(backendId);
   const start = useNodes((s) => s.startRuntime);
   const stop = useNodes((s) => s.stopRuntime);
   const restart = useNodes((s) => s.restartRuntime);

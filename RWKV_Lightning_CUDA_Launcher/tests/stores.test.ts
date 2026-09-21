@@ -39,7 +39,7 @@ const { useNodes } = await import("../src/stores/nodes");
 const { useChat } = await import("../src/stores/chat");
 const { useTranslate } = await import("../src/stores/translate");
 const { useSettings, useSecret } = await import("../src/stores/settings");
-const { useRuntimeForm, useQuantizationForm, useTuningForm } = await import(
+const { useRuntimeForm, useQuantizationForm, useTuningForm, EMPTY_RUNTIME_FORM } = await import(
   "../src/stores/forms"
 );
 const { applyDevice, deviceSelection, defaultRuntime } = await import(
@@ -109,9 +109,9 @@ afterEach(() => {
   useTranslate.getState().clear();
   useSettings.getState().reset();
   useSecret.getState().setKey("");
-  useRuntimeForm.getState().reset();
-  useQuantizationForm.getState().reset();
-  useTuningForm.getState().reset();
+  useRuntimeForm.getState().resetAll();
+  useQuantizationForm.getState().resetAll();
+  useTuningForm.getState().resetAll();
   useBackends.setState({ list: [], currentId: "", error: "", loaded: false });
   useNodes.setState({ snapshots: {}, busy: {} });
   values.clear();
@@ -264,13 +264,18 @@ describe("runtime control", () => {
   it("starts the runtime with the full config plus the device selection", async () => {
     useBackends.setState({ list: [backend], currentId: backend.id });
     const calls = capture();
-    useRuntimeForm.getState().set({ model_path: "/data/models/m.pth" });
-    useRuntimeForm.getState().setDevices({ mode: "explicit", value: "0,1" });
+    useRuntimeForm.getState().set(backend.id, { model_path: "/data/models/m.pth" });
+    useRuntimeForm
+      .getState()
+      .setDevices(backend.id, { mode: "explicit", value: "0,1" });
     await useNodes
       .getState()
       .startRuntime(
         backend.id,
-        applyDevice({ ...useRuntimeForm.getState().config }, { mode: "explicit", value: "0,1" }),
+        applyDevice(
+          { ...useRuntimeForm.getState().byBackend[backend.id].config },
+          { mode: "explicit", value: "0,1" },
+        ),
       );
     const start = calls.find((call) => call.url.endsWith("/runtime/start"));
     expect(start?.url).toBe(
@@ -514,21 +519,85 @@ describe("log stream snapshots", () => {
 
 describe("credentials", () => {
   it("never writes the runtime password or the Agent token to storage", () => {
-    useRuntimeForm.getState().set({ password: "runtime-secret" });
+    useRuntimeForm.getState().set("n1", { password: "runtime-secret" });
     useSecret.getState().setKey("agent-secret");
     const dump = [...values.values()].join("\n");
     expect(dump).not.toContain("runtime-secret");
     expect(dump).not.toContain("agent-secret");
     // The form itself still holds the password for this session.
-    expect(useRuntimeForm.getState().config.password).toBe("runtime-secret");
+    expect(useRuntimeForm.getState().byBackend["n1"].config.password).toBe(
+      "runtime-secret",
+    );
   });
 
   it("does not persist the quantization form across resets", () => {
-    useQuantizationForm.getState().set({ input_path: "/data/model.pth" });
-    expect(useQuantizationForm.getState().config.input_path).toBe(
-      "/data/model.pth",
+    useQuantizationForm.getState().set("n1", { input_path: "/data/model.pth" });
+    expect(
+      useQuantizationForm.getState().byBackend["n1"].config.input_path,
+    ).toBe("/data/model.pth");
+    useQuantizationForm.getState().reset("n1");
+    expect(useQuantizationForm.getState().byBackend["n1"]).toBeUndefined();
+  });
+});
+
+describe("per-backend form isolation", () => {
+  it("never carries one node's paths or card selection to another", () => {
+    const eightGpu = "node-8gpu";
+    const oneGpu = "node-1gpu";
+
+    useRuntimeForm.getState().set(eightGpu, { model_path: "/srv/a/m.pth" });
+    useRuntimeForm
+      .getState()
+      .setDevices(eightGpu, { mode: "explicit", value: "0,5" });
+
+    // The one-GPU node has never been configured: it must read as untouched,
+    // not inherit "0,5" from the box next to it.
+    const fresh =
+      useRuntimeForm.getState().byBackend[oneGpu] ?? EMPTY_RUNTIME_FORM;
+    expect(fresh.config.model_path).toBe("");
+    expect(fresh.devices).toEqual({ mode: "inherit" });
+
+    // Editing one node leaves the other alone.
+    useRuntimeForm.getState().set(oneGpu, { model_path: "/srv/b/m.pth" });
+    expect(useRuntimeForm.getState().byBackend[eightGpu].config.model_path).toBe(
+      "/srv/a/m.pth",
     );
-    useQuantizationForm.getState().reset();
-    expect(useQuantizationForm.getState().config.input_path).toBe("");
+    expect(
+      useRuntimeForm.getState().byBackend[eightGpu].devices,
+    ).toEqual({ mode: "explicit", value: "0,5" });
+  });
+
+  it("returns one stable object for an unconfigured node", () => {
+    // A fresh object per read would spin useSyncExternalStore forever.
+    const a = useRuntimeForm.getState().byBackend["ghost"] ?? EMPTY_RUNTIME_FORM;
+    const b = useRuntimeForm.getState().byBackend["ghost"] ?? EMPTY_RUNTIME_FORM;
+    expect(a).toBe(b);
+  });
+
+  it("seeds a node once and then leaves the user's edits alone", () => {
+    const id = "node-seed";
+    const seeded = {
+      config: { ...defaultRuntime, model_path: "/srv/running.pth" },
+      devices: { mode: "explicit" as const, value: "2" },
+    };
+    useRuntimeForm.getState().seed(id, seeded);
+    expect(useRuntimeForm.getState().byBackend[id].config.model_path).toBe(
+      "/srv/running.pth",
+    );
+
+    useRuntimeForm.getState().set(id, { model_path: "/srv/typed.pth" });
+    // A later poll must not stomp what the user typed.
+    useRuntimeForm.getState().seed(id, seeded);
+    expect(useRuntimeForm.getState().byBackend[id].config.model_path).toBe(
+      "/srv/typed.pth",
+    );
+  });
+
+  it("keeps each node's runtime password out of storage", () => {
+    useRuntimeForm.getState().set("n-a", { password: "secret-a" });
+    useRuntimeForm.getState().set("n-b", { password: "secret-b" });
+    const dump = [...values.values()].join("\n");
+    expect(dump).not.toContain("secret-a");
+    expect(dump).not.toContain("secret-b");
   });
 });

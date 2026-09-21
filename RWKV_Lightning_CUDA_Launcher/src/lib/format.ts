@@ -14,10 +14,21 @@ export function formatBytes(bytes: number | undefined | null, digits = 1) {
   return `${value.toFixed(exponent === 0 ? 0 : digits)} ${UNITS[exponent]}`;
 }
 
-export function formatGigabytes(bytes: number | undefined | null, digits = 1) {
-  if (bytes === undefined || bytes === null || !Number.isFinite(bytes))
-    return "—";
-  return `${(bytes / KIB ** 3).toFixed(digits)} GB`;
+/**
+ * `61.5 / 95.6 GB` — the unit once, as the mockup's `memText` does. Spelling
+ * it twice costs three characters that the 216px rail does not have: the row
+ * shares its line with the temperature/power pair, and once the two overflow
+ * flexbox shrinks and wraps *both* of them.
+ */
+export function formatGigabytePair(
+  used: number | undefined | null,
+  total: number | undefined | null,
+  digits = 1,
+) {
+  const finite = (value: number | undefined | null): value is number =>
+    value !== undefined && value !== null && Number.isFinite(value);
+  if (!finite(used) || !finite(total)) return "—";
+  return `${(used / KIB ** 3).toFixed(digits)} / ${(total / KIB ** 3).toFixed(digits)} GB`;
 }
 
 /** `elapsed` from ProcessStatus is in seconds. */

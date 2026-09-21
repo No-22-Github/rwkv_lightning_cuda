@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Play, Square, TriangleAlert } from "lucide-react";
 import { useCurrent } from "@/app/use-current";
 import { CopyButton, PageHeader, PathField } from "@/components/common";
@@ -24,7 +24,10 @@ import type {
 import { formatDuration } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
 import { hasCapability } from "@/stores/backends";
-import { useQuantizationForm } from "@/stores/forms";
+import {
+  useQuantizationForm,
+  useQuantizationFormEntry,
+} from "@/stores/forms";
 import { useLogs, useLogStream } from "@/stores/logs";
 import { useNodeBusy, useNodes } from "@/stores/nodes";
 import { toast } from "@/stores/ui";
@@ -80,7 +83,17 @@ export function QuantizationPage() {
   const { t } = useI18n();
   const { backendId, backend, jobs } = useCurrent();
   const nodeBusy = useNodeBusy(backendId);
-  const { config, devices, set, setDevices } = useQuantizationForm();
+  const { config, devices } = useQuantizationFormEntry(backendId);
+  const setField = useQuantizationForm((s) => s.set);
+  const setDeviceSelection = useQuantizationForm((s) => s.setDevices);
+  const set = useCallback(
+    (patch: Partial<QuantizationConfig>) => setField(backendId, patch),
+    [backendId, setField],
+  );
+  const setDevices = useCallback(
+    (selection: DeviceSelection) => setDeviceSelection(backendId, selection),
+    [backendId, setDeviceSelection],
+  );
   /** True while `output_path` is still the value we derived from the input. */
   const [autoOutput, setAutoOutput] = useState(false);
   const { lines } = useLogStream(backendId, "quantization");
@@ -155,7 +168,7 @@ export function QuantizationPage() {
   };
 
   return (
-    <div className="mx-auto max-w-[900px] px-6 pt-5.5 pb-10">
+    <div className="max-w-[900px] px-6 pt-5.5 pb-10">
       <PageHeader title={t("quant.title")} description={t("quant.subtitle")} />
 
       {!supportsQuant && (

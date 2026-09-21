@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, Play, Square, TriangleAlert } from "lucide-react";
 import { useCurrent } from "@/app/use-current";
 import { CopyButton, PageHeader, PathField } from "@/components/common";
@@ -25,7 +25,11 @@ import type {
 import { basename, formatCount, formatDuration, formatNumber } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
 import { hasCapability } from "@/stores/backends";
-import { useTuningForm } from "@/stores/forms";
+import {
+  resetTuningParameters,
+  useTuningForm,
+  useTuningFormEntry,
+} from "@/stores/forms";
 import { useLogs, useLogStream } from "@/stores/logs";
 import { useNodeBusy, useNodes } from "@/stores/nodes";
 import { toast } from "@/stores/ui";
@@ -124,7 +128,21 @@ export function TrainingPage() {
   const { t } = useI18n();
   const { backendId, backend, runtime, jobs } = useCurrent();
   const nodeBusy = useNodeBusy(backendId);
-  const { config, devices, set, setDevices, resetParameters } = useTuningForm();
+  const { config, devices } = useTuningFormEntry(backendId);
+  const setField = useTuningForm((s) => s.set);
+  const setDeviceSelection = useTuningForm((s) => s.setDevices);
+  const set = useCallback(
+    (patch: Partial<TuningConfig>) => setField(backendId, patch),
+    [backendId, setField],
+  );
+  const setDevices = useCallback(
+    (selection: DeviceSelection) => setDeviceSelection(backendId, selection),
+    [backendId, setDeviceSelection],
+  );
+  const resetParameters = useCallback(
+    () => resetTuningParameters(backendId),
+    [backendId],
+  );
   const [samples, setSamples] = useState<number | null>(null);
   const [validating, setValidating] = useState(false);
   const { lines } = useLogStream(backendId, "tuning");
@@ -312,7 +330,7 @@ export function TrainingPage() {
   };
 
   return (
-    <div className="mx-auto max-w-[1240px] px-6 pt-5.5 pb-10">
+    <div className="max-w-[1240px] px-6 pt-5.5 pb-10">
       <PageHeader
         eyebrow={backend?.name}
         title={t("training.title")}

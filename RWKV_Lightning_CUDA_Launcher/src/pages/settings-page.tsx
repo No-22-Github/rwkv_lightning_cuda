@@ -13,7 +13,7 @@ import { useI18n, type Lang } from "@/lib/i18n";
 import { languages, normalizeLanguage } from "@/lib/translate/languages";
 import { backendKindLabel, useBackends } from "@/stores/backends";
 import { useChat } from "@/stores/chat";
-import { useRuntimeForm } from "@/stores/forms";
+import { useRuntimeFormEntry } from "@/stores/forms";
 import { useSecret, useSettings, type ThemeMode } from "@/stores/settings";
 import { useTranslate } from "@/stores/translate";
 import { toast } from "@/stores/ui";
@@ -31,13 +31,13 @@ export function SettingsPage() {
   const { backend, backendId } = useCurrent();
   const list = useBackends((s) => s.list);
   const translationBusy = useTranslate((s) => s.busy);
-  const runtimePassword = useRuntimeForm((s) => s.config.password);
+  const runtimePassword = useRuntimeFormEntry(backendId).config.password;
   const [origin, setOrigin] = useState("");
 
   useEffect(() => setOrigin(window.location.origin), []);
 
   return (
-    <div className="mx-auto max-w-[820px] px-6 pt-5.5 pb-10">
+    <div className="max-w-[820px] px-6 pt-5.5 pb-10">
       <PageHeader title={t("settings.title")} />
 
       <Card className="mt-5">

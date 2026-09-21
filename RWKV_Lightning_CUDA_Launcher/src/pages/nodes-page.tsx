@@ -56,7 +56,7 @@ export function NodesPage() {
   ).length;
 
   return (
-    <div className="mx-auto max-w-[1240px] px-6 pt-5.5 pb-10">
+    <div className="max-w-[1240px] px-6 pt-5.5 pb-10">
       <PageHeader
         title={t("nodes.title")}
         description={t("nodes.subtitle")}
