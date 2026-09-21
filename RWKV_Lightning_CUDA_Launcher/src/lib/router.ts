@@ -19,21 +19,24 @@ const ALIASES: Record<string, Route> = {
   quantization: "quant",
 };
 
-function parse(hash: string): Route {
+/** Exported for tests: the single place a hash becomes a Route. */
+export function parseRoute(hash: string): Route {
   const raw = hash.replace(/^#\/?/, "").split("?")[0].trim();
-  if (raw in ALIASES) return ALIASES[raw];
+  // hasOwn, not `in`: `#/toString` would otherwise resolve to Object.prototype
+  // and hand back a function as the route.
+  if (Object.hasOwn(ALIASES, raw)) return ALIASES[raw];
   return (ROUTES as readonly string[]).includes(raw) ? (raw as Route) : "nodes";
 }
 
 export function navigate(route: Route) {
-  if (parse(location.hash) === route) return;
+  if (parseRoute(location.hash) === route) return;
   location.hash = `/${route}`;
 }
 
 export function useRoute(): Route {
-  const [route, setRoute] = useState<Route>(() => parse(location.hash));
+  const [route, setRoute] = useState<Route>(() => parseRoute(location.hash));
   useEffect(() => {
-    const onChange = () => setRoute(parse(location.hash));
+    const onChange = () => setRoute(parseRoute(location.hash));
     window.addEventListener("hashchange", onChange);
     return () => window.removeEventListener("hashchange", onChange);
   }, []);

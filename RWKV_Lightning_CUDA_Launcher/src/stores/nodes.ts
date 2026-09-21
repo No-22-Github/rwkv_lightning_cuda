@@ -4,6 +4,7 @@ import { inferenceApi } from "@/lib/api/inference";
 import { jobsApi } from "@/lib/api/jobs";
 import { nodeApi } from "@/lib/api/node";
 import { runtimeApi } from "@/lib/api/runtime";
+import { tNow } from "@/lib/i18n";
 import type {
   DeviceSelection,
   JobID,
@@ -34,16 +35,34 @@ const EMPTY: NodeSnapshot = { error: "", fetchedAt: 0 };
 /** Combine a caller signal with a status-poll deadline. */
 function withTimeout(signal: AbortSignal | undefined, ms: number) {
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), ms);
+  let timedOut = false;
+  const timer = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, ms);
   const abort = () => controller.abort();
   signal?.addEventListener("abort", abort, { once: true });
   return {
     signal: controller.signal,
+    /** True only when our own deadline fired — not when the caller aborted. */
+    get timedOut() {
+      return timedOut;
+    },
     done: () => {
       window.clearTimeout(timer);
       signal?.removeEventListener("abort", abort);
     },
   };
+}
+
+/**
+ * A poll that outran its deadline means "slow node", not "broken node". The
+ * raw DOMException reads as "signal is aborted without reason" and renders as
+ * a red failure notice on a node that is merely busy.
+ */
+function pollError(error: unknown, timedOut: boolean) {
+  if (timedOut) return tNow("node.pollTimeout");
+  return error instanceof Error ? error.message : String(error);
 }
 
 interface NodesState {
@@ -109,7 +128,7 @@ export const useNodes = create<NodesState>((set, get) => ({
     } catch (error) {
       if (signal?.aborted) return;
       patch(set, id, {
-        error: error instanceof Error ? error.message : String(error),
+        error: pollError(error, timeout.timedOut),
         fetchedAt: Date.now(),
       });
     } finally {
@@ -137,7 +156,7 @@ export const useNodes = create<NodesState>((set, get) => ({
       if (signal?.aborted) return;
       patch(set, id, {
         metrics: undefined,
-        metricsError: error instanceof Error ? error.message : String(error),
+        metricsError: pollError(error, timeout.timedOut),
       });
     } finally {
       timeout.done();

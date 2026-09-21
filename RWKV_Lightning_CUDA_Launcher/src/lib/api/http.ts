@@ -148,10 +148,7 @@ export async function nodeStream(
   return send(nodeUrl(backendId, path), options);
 }
 
-export async function clientStream(
-  path: string,
-  options: RequestOptions = {},
-) {
+export async function clientStream(path: string, options: RequestOptions = {}) {
   return send(clientUrl(path), options);
 }
 

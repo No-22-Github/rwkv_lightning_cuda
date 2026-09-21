@@ -4,7 +4,12 @@ import { useCurrent } from "@/app/use-current";
 import { PageHeader, PathField } from "@/components/common";
 import { DeviceSelector } from "@/components/device-selector";
 import { LogViewer } from "@/components/log-viewer";
-import { GpuList, modelName, runtimeLabel, runtimeTone } from "@/components/node-status";
+import {
+  GpuList,
+  modelName,
+  runtimeLabel,
+  runtimeTone,
+} from "@/components/node-status";
 import { RuntimeControls } from "@/components/runtime-controls";
 import { StatusDot } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -85,9 +90,7 @@ export function RuntimePage() {
     void inferenceApi
       .models(backendId, controller.signal)
       .then((response) => {
-        setModels(
-          response.available ?? response.data.map((entry) => entry.id),
-        );
+        setModels(response.available ?? response.data.map((entry) => entry.id));
         setSelectedModel(response.loaded ?? "");
       })
       .catch(() => setModels([]));
@@ -108,7 +111,11 @@ export function RuntimePage() {
       <NoNodeNotice />
 
       {inferenceOnly && (
-        <Notice tone="info" className="mt-5" icon={<Info className="size-3.5" />}>
+        <Notice
+          tone="info"
+          className="mt-5"
+          icon={<Info className="size-3.5" />}
+        >
           {t("runtime.unsupported")}
         </Notice>
       )}
@@ -246,6 +253,7 @@ export function RuntimePage() {
               label="visible_devices"
               selection={devices}
               onChange={setDevices}
+              retuneHint
             />
 
             <div className="grid grid-cols-2 gap-3">
@@ -258,7 +266,10 @@ export function RuntimePage() {
                   onChange={(event) => set({ port: event.target.value })}
                 />
               </Field>
-              <Field label={t("runtime.password")} hint={t("runtime.passwordHint")}>
+              <Field
+                label={t("runtime.password")}
+                hint={t("runtime.passwordHint")}
+              >
                 <Input
                   type="password"
                   autoComplete="off"

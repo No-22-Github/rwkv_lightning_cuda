@@ -517,6 +517,87 @@ describe("log stream snapshots", () => {
   });
 });
 
+describe("hash routing", () => {
+  it("resolves known routes and aliases, and refuses inherited properties", async () => {
+    const { parseRoute } = await import("../src/lib/router");
+    expect(parseRoute("#/chat")).toBe("chat");
+    expect(parseRoute("#/nodes")).toBe("nodes");
+    expect(parseRoute("")).toBe("nodes");
+    // Deep links kept from the previous console.
+    expect(parseRoute("#/state-tuning")).toBe("training");
+    expect(parseRoute("#/quantization")).toBe("quant");
+    expect(parseRoute("#/chat?x=1")).toBe("chat");
+    expect(parseRoute("#/nope")).toBe("nodes");
+    // `raw in ALIASES` walked the prototype chain and handed back a function,
+    // which blanked the header title and rendered an empty main pane.
+    for (const key of ["toString", "constructor", "__proto__", "valueOf"]) {
+      expect(parseRoute(`#/${key}`)).toBe("nodes");
+    }
+  });
+});
+
+describe("backend labels", () => {
+  it("names the local node from the catalogue, not from the wire", async () => {
+    const { backendLabel } = await import("../src/stores/backends");
+    const { translate } = await import("../src/lib/i18n");
+    const zh = (key: Parameters<typeof translate>[1]) => translate("zh", key);
+    const en = (key: Parameters<typeof translate>[1]) => translate("en", key);
+
+    // The Agent sends no name for the local node precisely so this is
+    // localizable rather than hard-coded in Go.
+    expect(backendLabel(zh, { id: "local", name: "" })).toBe("本机");
+    expect(backendLabel(en, { id: "local", name: "" })).toBe("This machine");
+    // Registered backends keep the name their user gave them, in any locale.
+    expect(backendLabel(en, { id: "a1b2c3", name: "gpu-01" })).toBe("gpu-01");
+    expect(backendLabel(zh, { id: "a1b2c3", name: "gpu-01" })).toBe("gpu-01");
+    // An older Agent that still sends one wins over the catalogue.
+    expect(backendLabel(en, { id: "local", name: "本机" })).toBe("本机");
+  });
+});
+
+describe("log stream lifecycle", () => {
+  it("never lets a finished task unregister a newer stream", async () => {
+    const { useLogs } = await import("../src/stores/logs");
+    // Hold the stream open until we say so, the way a live SSE connection
+    // does, so close() and open() can race the way they do in StrictMode.
+    let release: (() => void) | undefined;
+    fetchSpy.mockImplementation(
+      async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              release = () => controller.close();
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "text/event-stream" } },
+        ),
+    );
+
+    useLogs.getState().open("a1b2c3", "runtime");
+    await Promise.resolve();
+    // React's mount -> unmount -> mount: close and reopen within one tick.
+    useLogs.getState().close("a1b2c3", "runtime");
+    useLogs.getState().open("a1b2c3", "runtime");
+    const openCalls = fetchSpy.mock.calls.length;
+    // Let the aborted first task run its finally block.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    // If the first task deleted the second task's controller by key, this
+    // open() would start a *third* concurrent stream onto the same buffer.
+    useLogs.getState().open("a1b2c3", "runtime");
+    expect(fetchSpy.mock.calls.length).toBe(openCalls);
+
+    // And close() must still be able to abort the live stream — after which
+    // the underlying controller is already closed, hence the guard.
+    useLogs.getState().close("a1b2c3", "runtime");
+    try {
+      release?.();
+    } catch {
+      /* already closed by the abort, which is the point */
+    }
+  });
+});
+
 describe("credentials", () => {
   it("never writes the runtime password or the Agent token to storage", () => {
     useRuntimeForm.getState().set("n1", { password: "runtime-secret" });

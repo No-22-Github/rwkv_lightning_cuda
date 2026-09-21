@@ -1,3 +1,4 @@
+import { tNow } from "@/lib/i18n";
 import { nodeRequest, nodeStream } from "./http";
 import { readSSE, type StreamEvent } from "./sse";
 import type {
@@ -33,7 +34,7 @@ export const inferenceApi = {
       signal,
       headers: { Accept: "text/event-stream" },
     });
-    if (!response.body) throw new Error("推理服务没有返回流");
+    if (!response.body) throw new Error(tNow("error.noStream"));
     return readSSE(response.body, signal, onEvent);
   },
 

@@ -487,11 +487,78 @@ describe("loaded model reporting", () => {
     const { modelName } = await import("../src/components/node-status");
     const config = { model_path: "/models/rwkv-g1k-7b.pth" };
     // Offline node: the mockup shows "—", not the path it was asked to load.
-    expect(
-      modelName({ status: "offline", config } as never),
-    ).toBe("");
+    expect(modelName({ status: "offline", config } as never)).toBe("");
     expect(modelName({ status: "ready", config } as never)).toBe(
       "rwkv-g1k-7b.pth",
     );
+  });
+});
+
+describe("runtime control gating", () => {
+  const base = {
+    reachableAgent: true,
+    busy: false,
+    managed: false,
+    running: false,
+    canStart: true,
+  };
+
+  it("keeps Stop live while a managed runtime is still loading its model", async () => {
+    const { runtimeButtonState } = await import(
+      "../src/components/runtime-controls"
+    );
+    // A cold load sits at status "starting" — managed, not yet running — for
+    // as long as the model takes. Gating Stop on `running` made that window
+    // uninterruptible and left Start enabled, where it answered 400
+    // "backend is already running".
+    const loading = runtimeButtonState({ ...base, managed: true });
+    expect(loading.stopDisabled).toBe(false);
+    expect(loading.restartDisabled).toBe(false);
+    expect(loading.startDisabled).toBe(true);
+  });
+
+  it("offers Start on an idle node and not on a serving one", async () => {
+    const { runtimeButtonState } = await import(
+      "../src/components/runtime-controls"
+    );
+    const offline = runtimeButtonState(base);
+    expect(offline.startDisabled).toBe(false);
+    expect(offline.stopDisabled).toBe(true);
+
+    const ready = runtimeButtonState({ ...base, managed: true, running: true });
+    expect(ready.startDisabled).toBe(true);
+    expect(ready.stopDisabled).toBe(false);
+  });
+
+  it("never offers Start or Stop for a runtime this launcher does not own", async () => {
+    const { runtimeButtonState } = await import(
+      "../src/components/runtime-controls"
+    );
+    // Started by hand or by another launcher: ours to watch, not to control,
+    // and starting again would fight over the port.
+    const external = runtimeButtonState({ ...base, running: true });
+    expect(external.startDisabled).toBe(true);
+    expect(external.stopDisabled).toBe(true);
+    expect(external.restartDisabled).toBe(true);
+  });
+
+  it("blocks everything on an unreachable node, a busy node or a blank model path", async () => {
+    const { runtimeButtonState } = await import(
+      "../src/components/runtime-controls"
+    );
+    for (const patch of [{ reachableAgent: false }, { busy: true }]) {
+      const state = runtimeButtonState({ ...base, managed: true, ...patch });
+      expect(state.startDisabled).toBe(true);
+      expect(state.stopDisabled).toBe(true);
+      expect(state.restartDisabled).toBe(true);
+    }
+    // A blank model path stops Start only; a running process stays stoppable.
+    const noPath = runtimeButtonState({
+      ...base,
+      managed: true,
+      canStart: false,
+    });
+    expect(noPath.startDisabled).toBe(true);
+    expect(noPath.stopDisabled).toBe(false);
   });
 });

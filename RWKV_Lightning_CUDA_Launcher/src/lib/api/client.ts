@@ -1,3 +1,5 @@
+import { tNow } from "@/lib/i18n";
+
 /** Pure request-body helpers for the native inference API. */
 
 /**
@@ -5,7 +7,10 @@
  * `.pth` is stripped; an empty result falls back to `adapter`.
  */
 export function adapterIDFromFilename(filename: string) {
-  const name = filename.trim().replace(/\.pth$/i, "").trim();
+  const name = filename
+    .trim()
+    .replace(/\.pth$/i, "")
+    .trim();
   return name || "adapter";
 }
 
@@ -21,7 +26,7 @@ export function adapterFields(v: {
   if (!v.adapter_id?.trim()) return {};
   const scale = v.adapter_scale?.trim();
   if (scale && !Number.isFinite(Number(scale)))
-    throw new Error("Adapter scale must be finite");
+    throw new Error(tNow("error.adapterScale"));
   return {
     adapter_id: v.adapter_id.trim(),
     ...(v.adapter_version?.trim()

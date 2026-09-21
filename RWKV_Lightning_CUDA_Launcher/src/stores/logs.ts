@@ -81,7 +81,13 @@ export const useLogs = create<LogsState>((set, get) => {
             error: error instanceof Error ? error.message : String(error),
           });
         } finally {
-          controllers.delete(key);
+          // Delete only our own controller. close(key) followed by open(key)
+          // in the same tick (StrictMode's mount→unmount→mount, or any effect
+          // re-run) registers a newer controller under this key; deleting by
+          // key alone would drop it from the map while its stream is live,
+          // leaving that stream unabortable and letting the next open() start
+          // a second one that appends to the same lines.
+          if (controllers.get(key) === controller) controllers.delete(key);
         }
       })();
     },

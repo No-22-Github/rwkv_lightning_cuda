@@ -1,12 +1,5 @@
 import { useEffect } from "react";
-import {
-  Boxes,
-  Loader2,
-  Plus,
-  RefreshCw,
-  Server,
-  Trash2,
-} from "lucide-react";
+import { Boxes, Loader2, Plus, RefreshCw, Server, Trash2 } from "lucide-react";
 import {
   CapabilityBadges,
   modelName,
@@ -16,11 +9,16 @@ import {
 import { PageHeader } from "@/components/common";
 import { Badge, StatusDot } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardFooter,
+  CardHeader,
+} from "@/components/ui/card";
 import { EmptyState, Notice, StatCard } from "@/components/ui/primitives";
 import { formatRelativeTime } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
-import { backendKindLabel, useBackends } from "@/stores/backends";
+import { backendKindLabel, backendLabel, useBackends } from "@/stores/backends";
 import { useNodes } from "@/stores/nodes";
 import { toast, useUI } from "@/stores/ui";
 
@@ -48,7 +46,9 @@ export function NodesPage() {
   }, [refreshAll, list.length]);
 
   const reachable = list.filter((b) => b.reachable).length;
-  const ready = list.filter((b) => snapshots[b.id]?.runtime?.status === "ready").length;
+  const ready = list.filter(
+    (b) => snapshots[b.id]?.runtime?.status === "ready",
+  ).length;
   const jobCount = list.filter(
     (b) =>
       snapshots[b.id]?.jobs?.tuning?.running ||
@@ -92,7 +92,11 @@ export function NodesPage() {
 
       <div className="mt-5 grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3">
         <StatCard label={t("nodes.registered")} value={list.length} />
-        <StatCard label={t("nodes.reachable")} value={reachable} tone="success" />
+        <StatCard
+          label={t("nodes.reachable")}
+          value={reachable}
+          tone="success"
+        />
         <StatCard label={t("nodes.runtimeReady")} value={ready} />
         <StatCard
           label={t("nodes.runningJobs")}
@@ -133,10 +137,12 @@ export function NodesPage() {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="truncate text-sm font-semibold tracking-[-0.01em]">
-                        {backend.name}
+                        {backendLabel(t, backend)}
                       </span>
                       {backend.id === currentId && (
-                        <Badge variant="info">{t("settings.currentNode")}</Badge>
+                        <Badge variant="info">
+                          {t("settings.currentNode")}
+                        </Badge>
                       )}
                     </div>
                     <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
@@ -202,7 +208,10 @@ export function NodesPage() {
                       ? formatRelativeTime(backend.last_probe)
                       : t("backend.never")}
                   </span>
-                  <ProbeButton id={backend.id} name={backend.name} />
+                  <ProbeButton
+                    id={backend.id}
+                    name={backendLabel(t, backend)}
+                  />
                   <Button
                     size="xs"
                     disabled={backend.id === currentId}
@@ -212,7 +221,7 @@ export function NodesPage() {
                   </Button>
                   <RemoveButton
                     id={backend.id}
-                    name={backend.name}
+                    name={backendLabel(t, backend)}
                     disabled={backend.id === "local"}
                   />
                 </CardFooter>
@@ -236,7 +245,9 @@ function progressLabel(
   progress: { step?: number; total?: number } | null | undefined,
 ) {
   if (!progress?.step) return "running";
-  return progress.total ? `step ${progress.step}/${progress.total}` : `step ${progress.step}`;
+  return progress.total
+    ? `step ${progress.step}/${progress.total}`
+    : `step ${progress.step}`;
 }
 
 function ProbeButton({ id, name }: { id: string; name: string }) {

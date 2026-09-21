@@ -1,3 +1,5 @@
+import { tNow } from "@/lib/i18n";
+
 const KIB = 1024;
 const UNITS = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
 
@@ -51,7 +53,7 @@ export function formatRelativeTime(
 ) {
   if (!unixSeconds) return "—";
   const delta = Math.max(0, Math.floor(now / 1000 - unixSeconds));
-  if (delta < 5) return "刚刚";
+  if (delta < 5) return tNow("time.justNow");
   if (delta < 60) return `${delta}s`;
   if (delta < 3600) return `${Math.floor(delta / 60)}m`;
   if (delta < 86400) return `${Math.floor(delta / 3600)}h`;

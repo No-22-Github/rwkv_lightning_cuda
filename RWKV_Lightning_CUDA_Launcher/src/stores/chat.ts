@@ -3,6 +3,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { generationBody } from "@/lib/api/client";
 import { inferenceApi } from "@/lib/api/inference";
 import type { StreamEvent } from "@/lib/api/sse";
+import { tNow } from "@/lib/i18n";
 import { storage, useSettings } from "./settings";
 
 export interface ChatMessage {
@@ -102,7 +103,7 @@ export const useChat = create(
           );
         } catch (error) {
           reply.error = signal.aborted
-            ? "Generation stopped."
+            ? tNow("chat.stopped")
             : error instanceof Error
               ? error.message
               : String(error);

@@ -6,6 +6,7 @@ import type {
   BackendView,
   Capability,
 } from "@/lib/api/types";
+import type { MessageKey } from "@/lib/i18n";
 import { storage } from "./settings";
 
 interface BackendsState {
@@ -46,7 +47,12 @@ export const useBackends = create(
             currentId: stillThere ? current : (backends[0]?.id ?? ""),
           });
         } catch (error) {
-          if (signal?.aborted) return;
+          // Still clear `loading`: the store is a singleton, so leaving it set
+          // strands the spinner for every later consumer.
+          if (signal?.aborted) {
+            set({ loading: false });
+            return;
+          }
           set({
             loading: false,
             loaded: true,
@@ -102,7 +108,9 @@ export const useBackends = create(
                         ...b,
                         reachable: false,
                         probe_error:
-                          error instanceof Error ? error.message : String(error),
+                          error instanceof Error
+                            ? error.message
+                            : String(error),
                       }
                     : b,
                 ),
@@ -129,9 +137,22 @@ export function hasCapability(
   capability: Capability,
 ) {
   if (!backend) return false;
-  if (backend.kind === "inference_only")
-    return capability === "inference";
+  if (backend.kind === "inference_only") return capability === "inference";
   return backend.capabilities.includes(capability);
+}
+
+/**
+ * Display name for a backend. Every registered backend carries the name its
+ * user gave it; the local node is the one entry the Client synthesizes, so
+ * the Go side leaves `name` empty and the label comes from the message
+ * catalogue instead of being hard-coded in one language on the wire.
+ */
+export function backendLabel(
+  t: (key: MessageKey) => string,
+  backend: Pick<BackendView, "id" | "name">,
+) {
+  if (backend.name) return backend.name;
+  return backend.id === "local" ? t("backend.local") : backend.id;
 }
 
 /** Human-facing label for a probed backend. */

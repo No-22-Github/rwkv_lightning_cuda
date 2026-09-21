@@ -76,7 +76,9 @@ export function ModelLoader() {
     <div className="grid gap-2.5">
       <div className="flex items-center gap-2">
         <StatusDot tone={runtimeReady ? "ok" : "warn"} />
-        <span className="text-[12px] font-semibold">{t("chat.modelLoader")}</span>
+        <span className="text-[12px] font-semibold">
+          {t("chat.modelLoader")}
+        </span>
       </div>
       {dynamic && (
         <Field label={t("runtime.model")}>
@@ -100,7 +102,8 @@ export function ModelLoader() {
           ) : (
             gpus.map((gpu) => (
               <option key={gpu.index} value={String(gpu.index)}>
-                GPU {gpu.index} · {t("chat.gpuFree", { free: gigabytesFree(gpu) })}
+                GPU {gpu.index} ·{" "}
+                {t("chat.gpuFree", { free: gigabytesFree(gpu) })}
               </option>
             ))
           )}
@@ -118,6 +121,11 @@ export function ModelLoader() {
         {t("chat.loadHint")}
         {current ? ` ${t("chat.loadCurrent")} GPU ${current}.` : ""}
         {pinned ? ` ${t("runtime.devicePinnedHint", { card: pinned })}` : ""}
+        {/* The tune cache is card-bound, so the first load on a new card
+            retunes before it serves. Say so where the switch is made. */}
+        {cardValue !== "" && cardValue !== (current ?? "")
+          ? ` ${t("runtime.deviceRetuneHint")}`
+          : ""}
       </p>
     </div>
   );

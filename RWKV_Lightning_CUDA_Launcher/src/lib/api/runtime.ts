@@ -1,3 +1,4 @@
+import { tNow } from "@/lib/i18n";
 import { nodeRequest, nodeStream } from "./http";
 import type {
   RuntimeConfig,
@@ -17,9 +18,13 @@ export const runtimeApi = {
     }),
 
   stop: (backendId: string) =>
-    nodeRequest<{ ok: boolean } | undefined>(backendId, "/api/v1/runtime/stop", {
-      body: {},
-    }),
+    nodeRequest<{ ok: boolean } | undefined>(
+      backendId,
+      "/api/v1/runtime/stop",
+      {
+        body: {},
+      },
+    ),
 
   /** Restarts with the configuration the process actually runs with. */
   restart: (backendId: string) =>
@@ -35,7 +40,8 @@ export const runtimeApi = {
       body,
     }),
 
-  logsUrl: (backendId: string) => `/api/v1/backends/${backendId}/api/v1/runtime/logs`,
+  logsUrl: (backendId: string) =>
+    `/api/v1/backends/${backendId}/api/v1/runtime/logs`,
 };
 
 /**
@@ -54,7 +60,7 @@ export async function readLogStream(
     headers: { Accept: "text/event-stream" },
   });
   const body = response.body;
-  if (!body) throw new Error("日志流没有响应体");
+  if (!body) throw new Error(tNow("error.noLogStream"));
   const reader = body.getReader();
   const decoder = new TextDecoder();
   const cancel = () => void reader.cancel().catch(() => {});

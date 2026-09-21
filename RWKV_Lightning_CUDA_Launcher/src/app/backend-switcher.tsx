@@ -1,5 +1,9 @@
 import { ChevronsUpDown, Plus } from "lucide-react";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { StatusDot, StatusPill, type StatusTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,7 +13,7 @@ import {
   runtimeLabel,
 } from "@/components/node-status";
 import { useI18n } from "@/lib/i18n";
-import { backendKindLabel, useBackends } from "@/stores/backends";
+import { backendKindLabel, backendLabel, useBackends } from "@/stores/backends";
 import { useNodes } from "@/stores/nodes";
 import { useUI } from "@/stores/ui";
 import { cn } from "@/lib/utils";
@@ -74,8 +78,10 @@ export function BackendSwitcher() {
           </span>
           <span className="flex items-center gap-2 px-3 pt-1.5 pb-2.5">
             <span className="inline-flex h-[18px] items-center rounded-md bg-muted px-1.5 text-[10px] text-muted-foreground">
-              {backendKindLabel(current?.kind ?? "", current?.legacy ?? false) ||
-                t("backend.kind.unknown")}
+              {backendKindLabel(
+                current?.kind ?? "",
+                current?.legacy ?? false,
+              ) || t("backend.kind.unknown")}
             </span>
             {status && (
               <StatusPill
@@ -98,7 +104,12 @@ export function BackendSwitcher() {
             </div>
           ) : (
             <p className="px-3 py-2.5 text-[10.5px] leading-relaxed text-muted-foreground">
-              {gpuUnavailableReason(t, metrics, snapshot?.metricsError, current)}
+              {gpuUnavailableReason(
+                t,
+                metrics,
+                snapshot?.metricsError,
+                current,
+              )}
             </p>
           )}
         </div>
@@ -123,7 +134,7 @@ export function BackendSwitcher() {
               <StatusDot tone={itemTone} />
               <span className="block min-w-0">
                 <span className="block truncate text-[13px] font-medium">
-                  {backend.name}
+                  {backendLabel(t, backend)}
                 </span>
                 <span className="block truncate font-mono text-[11px] text-muted-foreground">
                   {backend.base_url}

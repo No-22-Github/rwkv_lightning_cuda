@@ -60,17 +60,16 @@ const zh = {
   "header.toggleSidebar": "折叠 / 展开侧栏",
   "header.expandSidebar": "展开侧栏",
 
+  "backend.local": "本机",
   "backend.registered": "已注册后端",
   "backend.add": "添加后端…",
   "backend.addTitle": "添加后端",
-  "backend.addDescription":
-    "POST /api/v1/backends · 添加时同步探测一次",
+  "backend.addDescription": "POST /api/v1/backends · 添加时同步探测一次",
   "backend.name": "名称",
   "backend.namePlaceholder": "gpu-02",
   "backend.baseUrl": "根地址",
   "backend.baseUrlPlaceholder": "http://10.0.0.21:18766",
-  "backend.baseUrlHint":
-    "填根地址，不带 /api 或 /v1；带后缀会被拒绝。",
+  "backend.baseUrlHint": "填根地址，不带 /api 或 /v1；带后缀会被拒绝。",
   "backend.token": "Agent token",
   "backend.tokenPlaceholder": "留空表示该节点不需要鉴权",
   "backend.tokenHint":
@@ -159,6 +158,8 @@ const zh = {
     "读不到 GPU 列表（旧版 Agent 或无指标），手动填写选卡串，如 0 或 0,1。",
   "runtime.deviceHint":
     "自动模式由 Agent 决定选卡（结果记录在日志里）；指定模式从下拉框选卡。launcher 以 --card 启动时，该卡是唯一允许的选择。",
+  "runtime.deviceRetuneHint":
+    "W8A16 调优缓存按卡区分，换卡后首次启动会先重新调优（通常几分钟），之后不再重复。",
   "runtime.port": "端口",
   "runtime.password": "runtime 密码",
   "runtime.passwordHint": "与 Agent token 不同；状态接口永远回显为空",
@@ -174,8 +175,7 @@ const zh = {
   "runtime.gpu": "GPU",
   "runtime.gpuUtilization": "利用率",
   "runtime.gpuNoMetrics": "无 GPU 指标",
-  "runtime.gpuReason.inference":
-    "裸推理节点：没有 Agent 指标能力。",
+  "runtime.gpuReason.inference": "裸推理节点：没有 Agent 指标能力。",
   "runtime.gpuReason.unreachable": "节点不可达，指标暂无。",
   "runtime.gpuReason.legacy": "旧版 Agent 不提供 GPU 指标（501）。",
   "runtime.gpuReason.unknown": "指标不可用。",
@@ -281,8 +281,7 @@ const zh = {
   "translate.targetPanel": "译文",
   "translate.chars": "{count} 字符",
   "translate.lines": "{count} 行",
-  "translate.placeholder":
-    "每行一段文本。空行会被忽略，行序在回填时保持。",
+  "translate.placeholder": "每行一段文本。空行会被忽略，行序在回填时保持。",
   "translate.empty": "还没有译文。",
   "translate.done": "完成",
   "translate.failed": "失败",
@@ -361,7 +360,7 @@ const zh = {
   "quant.progress": "进度",
   "quant.outputPath": "输出文件",
   "quant.unsupported": "该节点没有量化能力。",
-  "quant.visibleDevices": "选卡",
+  "quant.cpuOnly": "量化在 CPU 上运行，不占用显卡，也不会和推理或训练抢卡。",
 
   "settings.title": "设置",
   "settings.appearance": "外观与语言",
@@ -415,6 +414,17 @@ const zh = {
   "toast.adapterRegistered": "已注册 adapter {id} · {version}",
   "toast.adapterDeleted": "已删除 adapter {id}",
   "toast.unsupported": "该节点不支持此能力",
+
+  "node.pollTimeout": "节点响应超时（超过 6 秒），可能正忙；稍后自动重试。",
+
+  "time.justNow": "刚刚",
+
+  "error.noStream": "推理服务没有返回流",
+  "error.noLogStream": "日志流没有响应体",
+  "error.invalidSSE": "SSE 事件格式无效",
+  "error.adapterScale": "adapter scale 必须是有限数值",
+  "error.batchSize": "batch 大小必须是 1 到 128 之间的整数",
+  "error.storageFull": "浏览器存储已满或不可用。",
 } as const;
 
 export type MessageKey = keyof typeof zh;
@@ -472,6 +482,7 @@ const en: Record<MessageKey, string> = {
   "header.toggleSidebar": "Toggle sidebar",
   "header.expandSidebar": "Expand sidebar",
 
+  "backend.local": "This machine",
   "backend.registered": "REGISTERED BACKENDS",
   "backend.add": "Add backend…",
   "backend.addTitle": "Add backend",
@@ -571,6 +582,8 @@ const en: Record<MessageKey, string> = {
     "The GPU list is unavailable (legacy agent or no metrics) — type a spec like 0 or 0,1.",
   "runtime.deviceHint":
     "Auto lets the Agent choose the card (the choice is logged); Explicit picks one from the dropdown. With --card at launcher startup, that card is the only allowed choice.",
+  "runtime.deviceRetuneHint":
+    "The W8A16 tuning cache is per-card, so the first start on a new card retunes before serving (usually a couple of minutes). It happens once.",
   "runtime.port": "Port",
   "runtime.password": "Runtime password",
   "runtime.passwordHint":
@@ -773,12 +786,12 @@ const en: Record<MessageKey, string> = {
   "quant.group128": "128 · recommended",
   "quant.group32": "32 · higher fidelity",
   "quant.start": "Quantize",
-  "quant.hint":
-    "Conversion runs on the node and may use substantial RAM.",
+  "quant.hint": "Conversion runs on the node and may use substantial RAM.",
   "quant.progress": "Progress",
   "quant.outputPath": "Output file",
   "quant.unsupported": "This node has no quantization capability.",
-  "quant.visibleDevices": "Devices",
+  "quant.cpuOnly":
+    "Quantization runs on the CPU. It uses no GPU and never competes with inference or training for a card.",
 
   "settings.title": "Settings",
   "settings.appearance": "Appearance & language",
@@ -834,6 +847,18 @@ const en: Record<MessageKey, string> = {
   "toast.adapterRegistered": "Registered adapter {id} · {version}",
   "toast.adapterDeleted": "Deleted adapter {id}",
   "toast.unsupported": "This node does not support that capability",
+
+  "node.pollTimeout":
+    "The node did not answer within 6s — it may be busy. Retrying automatically.",
+
+  "time.justNow": "just now",
+
+  "error.noStream": "The inference service returned no stream",
+  "error.noLogStream": "The log stream has no response body",
+  "error.invalidSSE": "Invalid SSE event",
+  "error.adapterScale": "Adapter scale must be finite",
+  "error.batchSize": "Batch size must be an integer from 1 to 128",
+  "error.storageFull": "Browser storage is full or unavailable.",
 };
 
 export const catalog: Record<Lang, Record<MessageKey, string>> = { zh, en };

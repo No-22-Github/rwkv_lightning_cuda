@@ -1,34 +1,21 @@
 import { useCallback, useEffect, useState } from "react";
-import { Play, Square, TriangleAlert } from "lucide-react";
+import { Cpu, Play, Square, TriangleAlert } from "lucide-react";
 import { useCurrent } from "@/app/use-current";
 import { CopyButton, PageHeader, PathField } from "@/components/common";
-import { DeviceSelector } from "@/components/device-selector";
 import { LogViewer } from "@/components/log-viewer";
 import { StatusDot } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Notice, Progress } from "@/components/ui/primitives";
 import { Select } from "@/components/ui/select";
-import { applyDevice, suggestedQuantizedPath } from "@/lib/api/launcher";
-import type {
-  DeviceSelection,
-  QuantizationConfig,
-  QuantizationFormat,
-} from "@/lib/api/types";
+import { suggestedQuantizedPath } from "@/lib/api/launcher";
+import type { QuantizationConfig, QuantizationFormat } from "@/lib/api/types";
 import { formatDuration } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
 import { hasCapability } from "@/stores/backends";
-import {
-  useQuantizationForm,
-  useQuantizationFormEntry,
-} from "@/stores/forms";
+import { useQuantizationForm, useQuantizationFormEntry } from "@/stores/forms";
 import { useLogs, useLogStream } from "@/stores/logs";
 import { useNodeBusy, useNodes } from "@/stores/nodes";
 import { toast } from "@/stores/ui";
@@ -39,16 +26,11 @@ export function QuantizationPage() {
   const { t } = useI18n();
   const { backendId, backend, jobs } = useCurrent();
   const nodeBusy = useNodeBusy(backendId);
-  const { config, devices } = useQuantizationFormEntry(backendId);
+  const { config } = useQuantizationFormEntry(backendId);
   const setField = useQuantizationForm((s) => s.set);
-  const setDeviceSelection = useQuantizationForm((s) => s.setDevices);
   const set = useCallback(
     (patch: Partial<QuantizationConfig>) => setField(backendId, patch),
     [backendId, setField],
-  );
-  const setDevices = useCallback(
-    (selection: DeviceSelection) => setDeviceSelection(backendId, selection),
-    [backendId, setDeviceSelection],
   );
   /** True while `output_path` is still the value we derived from the input. */
   const [autoOutput, setAutoOutput] = useState(false);
@@ -98,9 +80,7 @@ export function QuantizationPage() {
   const start = async () => {
     if (!backendId) return;
     try {
-      await useNodes
-        .getState()
-        .startQuantization(backendId, applyDevice(config, devices));
+      await useNodes.getState().startQuantization(backendId, config);
     } catch (error) {
       toast.error(
         t("toast.failed", {
@@ -160,7 +140,10 @@ export function QuantizationPage() {
 
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label={t("quant.format")}>
-              <Select value={config.format} onChange={(event) => onFormatChange(event.target.value)}>
+              <Select
+                value={config.format}
+                onChange={(event) => onFormatChange(event.target.value)}
+              >
                 <option value="w4a16">{t("quant.formatW4")}</option>
                 <option value="w8a16">{t("quant.formatW8")}</option>
               </Select>
@@ -181,11 +164,9 @@ export function QuantizationPage() {
             </Field>
           </div>
 
-          <DeviceSelector
-            label={t("quant.visibleDevices")}
-            selection={devices}
-            onChange={setDevices}
-          />
+          <Notice tone="info" icon={<Cpu className="size-3.5" />}>
+            {t("quant.cpuOnly")}
+          </Notice>
 
           <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
             <Button variant="default" disabled={!canStart} onClick={start}>

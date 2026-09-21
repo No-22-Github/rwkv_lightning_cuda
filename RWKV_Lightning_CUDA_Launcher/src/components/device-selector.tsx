@@ -7,11 +7,11 @@ import type { DeviceSelection, GpuMetric } from "@/lib/api/types";
 import { useI18n } from "@/lib/i18n";
 
 /**
- * Device picker shared by Runtime, Training and Quantization. The UI offers
- * two modes — 自动 (the Agent's §5.8 chain: --card, inherited env, else free-
- * VRAM placement) and 指定 (a dropdown fed by the node's GPU metrics) — while
- * the wire keeps the tri-state DeviceSelection (the empty "inject nothing"
- * mode stays API-only).
+ * Device picker shared by Runtime and Training — quantization has none, since
+ * rwkv_quantize never touches a GPU. The UI offers two modes: 自动 (the
+ * Agent's §5.8 chain: --card, inherited env, else free-VRAM placement) and
+ * 指定 (a dropdown fed by the node's GPU metrics). The wire keeps the
+ * tri-state DeviceSelection (the empty "inject nothing" mode stays API-only).
  *
  * When the node's launcher is pinned by --card (`runtime.card`), 指定 locks to
  * the pinned spec: the Agent refuses anything else with 400, so offering the
@@ -22,11 +22,18 @@ export function DeviceSelector({
   selection,
   onChange,
   className,
+  retuneHint = false,
 }: {
   label: string;
   selection: DeviceSelection;
   onChange: (selection: DeviceSelection) => void;
   className?: string;
+  /**
+   * Runtime only: moving the runtime to a different card changes the W8A16
+   * tune-cache path, so the first start there retunes. Training does not use
+   * that cache, and quantization does not use a GPU at all.
+   */
+  retuneHint?: boolean;
 }) {
   const { t } = useI18n();
   const { runtime, metrics } = useCurrent();
@@ -51,7 +58,9 @@ export function DeviceSelector({
       <div className="grid gap-2">
         <Select
           value={selection.mode === "explicit" ? "explicit" : "inherit"}
-          onChange={(event) => switchMode(event.target.value as DeviceSelection["mode"])}
+          onChange={(event) =>
+            switchMode(event.target.value as DeviceSelection["mode"])
+          }
         >
           <option value="inherit">{t("runtime.deviceAuto")}</option>
           <option value="explicit">{t("runtime.deviceExplicit")}</option>
@@ -108,6 +117,14 @@ export function DeviceSelector({
             {t("runtime.deviceNoMetricsHint")}
           </p>
         )}
+        {retuneHint &&
+          selection.mode === "explicit" &&
+          current !== "" &&
+          current !== (runtime?.visible_devices ?? "") && (
+            <p className="text-[11px] leading-snug text-muted-foreground">
+              {t("runtime.deviceRetuneHint")}
+            </p>
+          )}
       </div>
     </Field>
   );

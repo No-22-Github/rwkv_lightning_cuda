@@ -69,10 +69,7 @@ function useNodePolling(backendId: string) {
     void refresh(backendId, controller.signal);
     void refreshMetrics(backendId, controller.signal);
     const fast = window.setInterval(() => void refresh(backendId), 1600);
-    const slow = window.setInterval(
-      () => void refreshMetrics(backendId),
-      6000,
-    );
+    const slow = window.setInterval(() => void refreshMetrics(backendId), 6000);
     return () => {
       controller.abort();
       window.clearInterval(fast);
@@ -95,7 +92,7 @@ function useLogStreamScope(backendId: string) {
 function useStorageErrorNotice() {
   useEffect(() => {
     const onError = () =>
-      toast.error(tNow("common.error"), "Browser storage is full or unavailable.");
+      toast.error(tNow("common.error"), tNow("error.storageFull"));
     window.addEventListener("storage-error", onError);
     return () => window.removeEventListener("storage-error", onError);
   }, []);

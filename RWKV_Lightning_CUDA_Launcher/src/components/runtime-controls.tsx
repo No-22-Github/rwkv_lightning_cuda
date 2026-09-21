@@ -9,6 +9,49 @@ import { useNodes } from "@/stores/nodes";
 import { toast } from "@/stores/ui";
 import { runtimeLabel, runtimeTone } from "@/components/node-status";
 
+/**
+ * Which of Start / Stop / Restart are usable, from two independent facts the
+ * Agent reports — neither of which answers the question on its own:
+ *
+ *   managed — this launcher owns the process (p.cmd != nil). True from the
+ *             moment it spawns, so it covers the whole cold-load window.
+ *   running — something is serving the port. True both for a runtime we own
+ *             and for one started outside this launcher, and false while ours
+ *             is still loading a model.
+ *
+ * Stop and Restart therefore follow `managed`: is there a process of ours to
+ * act on. Gating them on `running` left a multi-GB cold load uninterruptible,
+ * because a loading runtime reports running=false for minutes.
+ *
+ * Start follows both: refuse when a process of ours exists (it would answer
+ * "backend is already running") and when something else already holds the
+ * port.
+ *
+ * Exported because it is the rule worth pinning in tests — the component
+ * itself cannot be rendered with seeded store state, since zustand serves
+ * `getInitialState` to `renderToStaticMarkup`.
+ */
+export function runtimeButtonState(input: {
+  reachableAgent: boolean;
+  busy: boolean;
+  managed: boolean;
+  running: boolean;
+  canStart: boolean;
+}) {
+  const { reachableAgent, busy, managed, running, canStart } = input;
+  const blocked = !reachableAgent || busy;
+  return {
+    busy,
+    managed,
+    running,
+    disabled: !reachableAgent,
+    canStart,
+    startDisabled: blocked || managed || running || !canStart,
+    stopDisabled: blocked || !managed,
+    restartDisabled: blocked || !managed,
+  };
+}
+
 function useActions() {
   const { t } = useI18n();
   const { backendId, hasAgent, runtime, backend, busy } = useCurrent();
@@ -32,14 +75,15 @@ function useActions() {
 
   return {
     t,
-    busy,
-    running: Boolean(runtime?.running),
-    // An unmanaged runtime (started outside this launcher) is reported ready
-    // but is not ours to stop, and starting again would fight over the port.
-    unmanaged: runtime?.managed === false,
-    // An inference-only or unreachable node cannot be controlled at all.
-    disabled: !backendId || !hasAgent || !backend?.reachable,
-    canStart: Boolean(form.model_path.trim()),
+    ...runtimeButtonState({
+      // An inference-only or unreachable node cannot be controlled at all.
+      reachableAgent:
+        Boolean(backendId) && hasAgent && Boolean(backend?.reachable),
+      busy,
+      managed: Boolean(runtime?.managed),
+      running: Boolean(runtime?.running),
+      canStart: Boolean(form.model_path.trim()),
+    }),
     start: () =>
       run(
         () => start(backendId, applyDevice({ ...form }, devices)),
@@ -64,13 +108,7 @@ export function RuntimeControls({
         <Button
           variant="default"
           size={size}
-          disabled={
-            actions.disabled ||
-            actions.busy ||
-            actions.running ||
-            actions.unmanaged ||
-            !actions.canStart
-          }
+          disabled={actions.startDisabled}
           onClick={() => void actions.start()}
         >
           <Play className="size-3.5" />
@@ -78,12 +116,7 @@ export function RuntimeControls({
         </Button>
         <Button
           size={size}
-          disabled={
-            actions.disabled ||
-            actions.busy ||
-            !actions.running ||
-            actions.unmanaged
-          }
+          disabled={actions.stopDisabled}
           onClick={() => void actions.stop()}
         >
           <Square className="size-3.5" />
@@ -91,12 +124,7 @@ export function RuntimeControls({
         </Button>
         <Button
           size={size}
-          disabled={
-            actions.disabled ||
-            actions.busy ||
-            !actions.running ||
-            actions.unmanaged
-          }
+          disabled={actions.restartDisabled}
           onClick={() => void actions.restart()}
         >
           <RotateCcw className="size-3.5" />
