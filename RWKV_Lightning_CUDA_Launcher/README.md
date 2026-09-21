@@ -7,6 +7,7 @@ Go Launcher + React / TypeScript 静态 WebUI，使用 Vite 构建、Tailwind CS
 - [前端与第三方联调指南](docs/integration-guide.md)：接入方式、鉴权、curl / SDK 示例、错误与 SSE。
 - [控制面 API 参考](docs/control-plane-api.md)：完整路由、请求体、返回值与兼容约定。
 - [前端开发指南](docs/frontend-development.md)：工程结构、Tailwind 接入、多后端架构、Bun 与测试。
+- [未决事项](docs/open-items.md)：已知但未修的问题、需要先做决定的兼容性取舍、尚未实机验收的范围。
 - [原生推理 API](../rwkv_lightning_api_doc.md)：C++ server 的生成、模型、state、adapter 接口。
 
 前端框架是 React，样式为 Tailwind CSS 4（CSS-first `@theme` 令牌 + shadcn 风格自建组件 + Radix primitives），不使用 HeroUI；Bun 用于依赖管理、脚本执行和测试。
