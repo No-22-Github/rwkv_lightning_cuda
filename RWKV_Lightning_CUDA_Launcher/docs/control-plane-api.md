@@ -284,7 +284,9 @@ loading on "…" is refused`），runtime/tuning/quantization/`runtime/load` 四
 
 ### RuntimeConfig
 
-用于 `POST /api/v1/runtime/start`。start 在上次保存的配置上解码，因此省略字段会保留已有值（包括曾显式指定的 `visible_devices`）；首次启动的默认值不应被当成每次请求都会重新应用。restart 使用已保存配置，不使用请求体里的新表单。
+用于 `POST /api/v1/runtime/start`。start 在上次保存的配置上解码，因此省略字段会保留已有值；首次启动的默认值不应被当成每次请求都会重新应用。
+
+**例外：`visible_devices` 不继承。** 它每次都按 §选卡 优先级链重新解析——省略即表示「交给 Agent 决定」（前端「自动」模式正是省略该字段）。否则一旦显式选过一次卡，就再也无法回到自动放置。restart 使用已保存配置（含选卡），不使用请求体里的新表单。
 
 #### `POST /api/v1/runtime/load`
 
@@ -404,9 +406,9 @@ MiSS 请求在此基础上改 `method:"miss"`，补 `rank:16`、`alpha:16`、`ta
 | `output_path` | string | `.rwkvq` 路径，父目录须存在；文件须尚不存在，不能覆盖输入 |
 | `format` | string | `w8a16` 或 `w4a16`，空值按 w4a16 |
 | `group_size` | integer | W4A16 为 32/128；0 按 128；W8A16 不使用 |
-| `visible_devices` | string，可省略 | 同 RuntimeConfig |
+| `visible_devices` | string，可省略 | **已忽略**：`rwkv_quantize` 为纯 CPU 工具（`tools/CMakeLists.txt` 不链接 `rwkv::backend`），Agent 不做 `--card` 校验、不采样显存、不注入 `CUDA_VISIBLE_DEVICES`。字段保留仅为兼容仍在发送它的客户端 |
 
-启动成功为 `200 {"ok":true}`。训练/量化的 `POST /api/v1/jobs/{id}/stop` 成功为 **HTTP 200 空响应体**，不要无条件 `response.json()`；旧版 Agent 返回体可能不同，应允许空体或成功 JSON。
+量化不占显卡，因此也不参与 runtime↔training 的同卡互斥。启动成功为 `200 {"ok":true}`。训练/量化的 `POST /api/v1/jobs/{id}/stop` 成功为 **HTTP 200 空响应体**，不要无条件 `response.json()`；旧版 Agent 返回体可能不同，应允许空体或成功 JSON。
 
 ### ProcessStatus 与 RuntimeState
 

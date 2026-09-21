@@ -111,9 +111,10 @@ def main():
     launcher_env = dict(os.environ)
     launcher_env["CGO_ENABLED"] = "0" if WINDOWS else "1"
     launcher_ldflags = "-s -w"
-    release_version = os.environ.get("RWKV_RELEASE_VERSION")
-    if release_version:
-        launcher_ldflags += " -X main.launcherVersion=" + release_version
+    # package_version() sanitizes, and -ldflags is split on spaces: an
+    # unsanitized value with a space in it silently breaks the flag apart.
+    if os.environ.get("RWKV_RELEASE_VERSION"):
+        launcher_ldflags += " -X main.launcherVersion=" + package_version()
     run("go", "build", "-trimpath", f"-ldflags={launcher_ldflags}", "-o",
         bundle / ("rwkv_launcher" + SUFFIX), ".",
         cwd=ROOT / "RWKV_Lightning_CUDA_Launcher", env=launcher_env)

@@ -95,12 +95,16 @@ jobs:
         shell: bash
         run: |
           (cd RWKV_Lightning_CUDA_router && go test ./... && go vet ./...)
-          (cd RWKV_Lightning_CUDA_Launcher && go test ./... && go vet ./...)
+          # `.`, not `./...`: bun install has already populated node_modules,
+          # and ./... walks into the Go package that ships inside the `flatted`
+          # npm dependency. Compiling a JS dependency's Go sources is not
+          # something this build should be able to fail on.
+          (cd RWKV_Lightning_CUDA_Launcher && go test . && go vet .)
           # The launcher's NVML metrics file is guarded by "linux && cgo";
           # compile it once with CGO enabled so build errors surface in CI
           # instead of at release time (no CUDA toolkit needed, only gcc).
           if [ "$(go env GOOS)" = "linux" ]; then
-            (cd RWKV_Lightning_CUDA_Launcher && CGO_ENABLED=1 go build ./...)
+            (cd RWKV_Lightning_CUDA_Launcher && CGO_ENABLED=1 go build .)
           fi
       - name: Set up MSVC
         if: runner.os == 'Windows'

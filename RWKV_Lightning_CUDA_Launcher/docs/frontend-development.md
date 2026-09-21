@@ -66,7 +66,7 @@ src/
   styles/globals.css    Tailwind 入口、主题令牌与 Markdown 排版
 tests/                  Bun 测试
 docs/                   对接与开发文档
-dist/                   已跟踪的生产构建；由 Go embed
+dist/                   生产构建产物，**不入库**；由 Go `//go:embed dist/*` 嵌入
 ```
 
 Go 侧：`main.go` 管进程、CLI 参数与启动；`api.go` 管控制路由和鉴权；`request_types.go` 集中定义进程控制请求体；`backends.go` 管注册表和转发；`legacy.go` 管旧协议适配；`fsbrowse.go` 管目录白名单；`devices.go` 管选卡；`metrics*.go` 管指标。构建必须使用 `go build .`，不能只编译 `main.go`。
@@ -77,13 +77,13 @@ Go 侧：`main.go` 管进程、CLI 参数与启动；`api.go` 管控制路由和
 
 - `stores/backends.ts`：注册表列表、当前 backend ID（持久化 `rwkv-backends-v1`）、`add` / `remove` / `probe` / `probeAll`。`hasCapability()` 是唯一的降级判据。
 - `stores/nodes.ts`：按 backend ID 保存 `NodeSnapshot`（`info` / `runtime` / `jobs` / `metrics`），并提供 runtime 与 jobs 的控制动作。`useCurrent()` 汇总当前节点上下文。
-- `stores/logs.ts`：runtime 与 jobs 的日志 SSE 连接，键为 `backendId:kind`，切换节点会关闭旧连接，重连会重放缓冲日志。
+- `stores/logs.ts`：runtime 与 jobs 的日志 SSE 连接，键为 `backendId:kind`，切换节点会关闭旧连接，重连会重放缓冲日志。任务结束时只删除自己注册的 controller（同一 tick 内 close→open 会换上新的，按键盲删会让新连接失去 abort 能力并在下次 open 时重复建流）。
 - `stores/chat.ts`、`stores/translate.ts`：会话与翻译结果按 backend ID 隔离，翻译还记录 `owner`，切换节点不会串结果。
 - 轮询在 `app/App.tsx`：注册表 8s、runtime/jobs 1.6s、GPU 指标 6s；`NodesPage` 另外每 5s 刷新全部节点。
 
 能力降级：`kind:"inference_only"` 的节点只用推理 API，不显示起停进程、训练、量化、目录浏览与 GPU 指标；旧版 Agent（`legacy:true`）不宣告 `fs` / `metrics` / `host_dialog`；未知 capability 一律忽略。
 
-`visible_devices` 是三态字符串，不要退化成数字数组：`DeviceSelection` 的 `inherit` 会省略字段（沿用 Agent `--card` 或继承环境），`none` 发送 `""`（显式不注入），`explicit` 发送实际选卡串。`applyDevice()` 负责落到请求体。
+`visible_devices` 是三态字符串，不要退化成数字数组：`DeviceSelection` 的 `inherit` 会省略字段（由 Agent 按 §选卡 优先级链解析），`none` 发送 `""`（显式不注入），`explicit` 发送实际选卡串。`applyDevice()` 负责落到请求体。量化没有选卡控件——`rwkv_quantize` 是纯 CPU 工具。
 
 Translate 直接调用 `/v1/batch/completions`（不再依赖 Go 的 `contents → batch` 改写），每批最多 128 行，结果按 `choices[].index` 回填。
 
@@ -91,4 +91,4 @@ Translate 直接调用 `/v1/batch/completions`（不再依赖 Go 的 `contents �
 
 仅维护 `bun.lock`，不用第二份包管理锁文件。增减依赖后用 Bun 更新锁文件；CI 使用 frozen install，执行 lint/test/build 后编译 Go。
 
-修改前端源码、依赖或样式后，应重新 `bun run build`，将 `dist/` 与源码、配置和锁文件一起提交。不要提交 node_modules、Go 本机二进制或临时缓存。Bun 测试中的静态渲染断言不等于浏览器视觉或真实 GPU 验收；改动布局或主题后需在浏览器中确认，GPU 实机行为另做验收。
+修改前端源码、依赖或样式后，必须重新 `bun run build` 再编译 Go，否则 `//go:embed dist/*` 会直接编译失败（`pattern dist/*: no matching files found`）。`dist/` 是构建产物，**不要提交**——CI 会用锁文件重装依赖并重新构建；同样不要提交 node_modules、Go 本机二进制或临时缓存。Bun 测试中的静态渲染断言不等于浏览器视觉或真实 GPU 验收；改动布局或主题后需在浏览器中确认，GPU 实机行为另做验收。
