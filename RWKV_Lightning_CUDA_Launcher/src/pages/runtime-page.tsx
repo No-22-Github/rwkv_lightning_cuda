@@ -96,7 +96,7 @@ export function RuntimePage() {
   const inferenceOnly = backend?.kind === "inference_only";
 
   return (
-    <div className="max-w-[1240px] px-6 pt-5.5 pb-10">
+    <div className="mx-auto max-w-[1240px] px-6 pt-5.5 pb-10">
       <PageHeader
         eyebrow={backend?.name ?? "—"}
         title={t("runtime.title")}

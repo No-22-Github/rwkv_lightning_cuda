@@ -330,7 +330,7 @@ export function TrainingPage() {
   };
 
   return (
-    <div className="max-w-[1240px] px-6 pt-5.5 pb-10">
+    <div className="mx-auto max-w-[1240px] px-6 pt-5.5 pb-10">
       <PageHeader
         eyebrow={backend?.name}
         title={t("training.title")}

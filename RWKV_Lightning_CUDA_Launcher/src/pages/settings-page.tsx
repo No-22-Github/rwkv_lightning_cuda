@@ -37,7 +37,7 @@ export function SettingsPage() {
   useEffect(() => setOrigin(window.location.origin), []);
 
   return (
-    <div className="max-w-[820px] px-6 pt-5.5 pb-10">
+    <div className="mx-auto max-w-[820px] px-6 pt-5.5 pb-10">
       <PageHeader title={t("settings.title")} />
 
       <Card className="mt-5">

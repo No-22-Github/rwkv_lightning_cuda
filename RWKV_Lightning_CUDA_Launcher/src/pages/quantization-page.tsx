@@ -168,7 +168,7 @@ export function QuantizationPage() {
   };
 
   return (
-    <div className="max-w-[900px] px-6 pt-5.5 pb-10">
+    <div className="mx-auto max-w-[900px] px-6 pt-5.5 pb-10">
       <PageHeader title={t("quant.title")} description={t("quant.subtitle")} />
 
       {!supportsQuant && (

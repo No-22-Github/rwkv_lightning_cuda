@@ -56,7 +56,10 @@ export function NodesPage() {
   ).length;
 
   return (
-    <div className="max-w-[1240px] px-6 pt-5.5 pb-10">
+    // Centered and wide: auto-fit collapses empty grid tracks, so a sparse
+    // registry stretches its cards instead of stranding them on the left of
+    // an ultrawide viewport.
+    <div className="mx-auto w-full max-w-[1720px] px-6 pt-5.5 pb-10">
       <PageHeader
         title={t("nodes.title")}
         description={t("nodes.subtitle")}
