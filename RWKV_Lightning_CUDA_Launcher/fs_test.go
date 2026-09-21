@@ -6,14 +6,30 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
+
+// fakeHome points the launcher's home directory at a throwaway dir. The
+// whitelist includes ~ by design (the WebUI picker starts there), and on
+// Windows runners the real temp dir lives *under* the real home — which
+// would silently make every "outside" path in these tests browsable. A fake
+// home keeps "outside the whitelist" deterministic on every OS.
+func fakeHome(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", t.TempDir())
+		return
+	}
+	t.Setenv("HOME", t.TempDir())
+}
 
 // fsAgentLauncher builds a launcher whose appDir contains a fake runtime
 // binary so the agent endpoints are live for fs tests.
 func fsAgentLauncher(t *testing.T) *launcher {
 	t.Helper()
+	fakeHome(t)
 	bin := backendExecutable()
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
