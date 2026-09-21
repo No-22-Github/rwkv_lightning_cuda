@@ -275,3 +275,15 @@ func callJSONRaw(t *testing.T, h http.Handler, method, url, body string, header 
 	_ = json.Unmarshal([]byte(raw), &out)
 	return w.Code, out, raw
 }
+
+// The local backend carries no name: the WebUI supplies a localized label.
+func TestLocalBackendHasNoHardcodedName(t *testing.T) {
+	l := newLauncher()
+	e, ok := l.localBackend()
+	if !ok {
+		t.Skip("no local runtime binary in this environment")
+	}
+	if e.Name != "" {
+		t.Fatalf("local backend name must come from the WebUI catalogue, got %q", e.Name)
+	}
+}

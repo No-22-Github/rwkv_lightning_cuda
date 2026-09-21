@@ -358,6 +358,13 @@ func (l *launcher) runtimeAction(action string, w http.ResponseWriter, r *http.R
 	defer l.mu.Unlock()
 	req := l.config
 	if action == "start" {
+		// Every other field inherits the saved config, but visible_devices
+		// must not: an absent field means "resolve through the §5.8 chain"
+		// (the picker's auto mode sends no key at all), so inheriting the
+		// last pin would make auto placement unreachable forever once a card
+		// had been named once. restart deliberately keeps the saved config,
+		// card included — it is a restart of the same runtime.
+		req.VisibleDevices = nil
 		if e := decode(w, r, &req); e != nil {
 			return e
 		}
@@ -482,17 +489,15 @@ func (l *launcher) handleQuantizationStart(w http.ResponseWriter, r *http.Reques
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if e := l.validateDeviceRequest(req.VisibleDevices); e != nil {
+	// rwkv_quantize is a CPU tool: tools/CMakeLists.txt builds it without
+	// rwkv::backend and without the cuda/ include path, and quantizationArgs
+	// passes it no device flag. So there is no --card check, no free-VRAM
+	// sampling and no CUDA_VISIBLE_DEVICES injection here, and nothing to
+	// exclude it against on the GPU either. quantizeRequest.VisibleDevices
+	// stays on the wire for compatibility and is ignored.
+	if e = l.quantization.launch(exe, args, "", ""); e != nil {
 		return e
 	}
-	devices := l.resolveVisibleDevices(req.VisibleDevices)
-	if e = l.quantization.launch(exe, args, "", devices.spec); e != nil {
-		return e
-	}
-	if devices.auto {
-		l.quantization.appendLog("auto device placement: GPU " + devices.spec + " (most free VRAM)")
-	}
-	l.quantDevices = devices
 	l.quantizationConfig = req
 	l.recordFSConfigs(l.config, l.tuningConfig, req)
 	l.quantization.mu.Lock()

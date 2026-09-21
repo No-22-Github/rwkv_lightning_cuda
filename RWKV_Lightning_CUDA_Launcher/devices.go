@@ -116,7 +116,14 @@ func pickFreestDevice(gpus []gpuSample) string {
 	best := -1
 	var bestFree uint64
 	for _, gpu := range gpus {
-		free := gpu.MemoryTotalBytes - gpu.MemoryUsedBytes
+		// rocmNumber returns 0 for any key it cannot match, and the ROCm
+		// field names drift between releases (metrics.go). A missed total
+		// next to a matched used would wrap this subtraction to ~2^64 and
+		// pin every auto-placed process onto that one card forever.
+		free := uint64(0)
+		if gpu.MemoryTotalBytes > gpu.MemoryUsedBytes {
+			free = gpu.MemoryTotalBytes - gpu.MemoryUsedBytes
+		}
 		if best == -1 || free > bestFree {
 			best, bestFree = gpu.Index, free
 		}
@@ -305,4 +312,25 @@ func deviceTuneCache(req startRequest, devices resolvedDevices) string {
 		dir = filepath.Dir(p)
 	}
 	return filepath.Join(dir, stem+".dev-"+tag+".w8a16.tune")
+}
+
+// tuneCacheNote explains the one-off W8A16 retune that a card-bound cache
+// path implies. deviceTuneCache pins the cache next to the state DB and names
+// it after the device spec, so the first start on a given card never finds
+// the C++ default cache (named after model stem + GPU name) and retunes
+// before serving. It costs a couple of minutes, once per model per card — a
+// log line is enough, but without one the runtime just looks hung.
+func tuneCacheNote(req startRequest, devices resolvedDevices) string {
+	if strings.TrimSpace(req.TuneCache) != "" {
+		return "" // explicit path: the caller owns it, say nothing
+	}
+	path := deviceTuneCache(req, devices)
+	if path == "" {
+		return "" // dynamic loading or no device tag: C++ default naming applies
+	}
+	if _, err := os.Stat(path); err == nil {
+		return ""
+	}
+	return "W8A16 tuning cache " + filepath.Base(path) + " not found for this card; " +
+		"the runtime retunes once before it starts serving (typically a couple of minutes)"
 }

@@ -283,10 +283,11 @@ type launcher struct {
 	tuningConfig       tuneRequest
 	quantizationConfig quantizeRequest
 
-	// §5.8 device state of the managed processes (guarded by mu).
+	// §5.8 device state of the managed GPU processes (guarded by mu).
+	// Quantization is absent on purpose — it never touches a GPU, see
+	// handleQuantizationStart.
 	runtimeDevices resolvedDevices
 	tuningDevices  resolvedDevices
-	quantDevices   resolvedDevices
 
 	// Startup form (§1): one binary, roles chosen at startup time.
 	listen     string
@@ -578,6 +579,9 @@ func (l *launcher) start(req startRequest) error {
 	}
 	if devices.auto {
 		l.runtime.appendLog("auto device placement: GPU " + devices.spec + " (most free VRAM)")
+	}
+	if note := tuneCacheNote(req, devices); note != "" {
+		l.runtime.appendLog(note)
 	}
 	l.config = req
 	l.runtimeDevices = devices
@@ -989,11 +993,19 @@ func main() {
 		go func() { time.Sleep(350 * time.Millisecond); openBrowser(url) }()
 	}
 	log.Printf("RWKV Lightning Launcher %s: %s (role: %s)", launcherVersion, url, l.role())
+	server := http.Server{Addr: l.listen, Handler: l.handler(), ReadHeaderTimeout: 5 * time.Second}
+	// Bind before probing. The "local" backend probe dials this very port, so
+	// a probe that wins the race against the listener caches Reachable=false
+	// for a full probeInterval — which greys out the runtime controls and the
+	// composer on a freshly started launcher.
+	ln, err := net.Listen("tcp", l.listen)
+	if err != nil {
+		log.Fatal(err)
+	}
 	// Display-only probes at startup and every probeInterval; results never
 	// gate any logic (I3).
 	go l.backends.probeAll(l.localBackend)
 	go l.backends.probeLoop(l.localBackend)
-	server := http.Server{Addr: l.listen, Handler: l.handler(), ReadHeaderTimeout: 5 * time.Second}
 	shutdown := make(chan os.Signal, 1)
 	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
 	go func() {
@@ -1007,7 +1019,7 @@ func main() {
 		defer cancel()
 		_ = server.Shutdown(ctx)
 	}()
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	if err := server.Serve(ln); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
 }

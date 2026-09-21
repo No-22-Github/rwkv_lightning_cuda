@@ -235,7 +235,11 @@ func (l *launcher) localBackend() (backendEntry, bool) {
 	if host == "" {
 		host = "127.0.0.1"
 	}
-	e := backendEntry{ID: "local", Name: "本机", BaseURL: "http://" + net.JoinHostPort(host, port)}
+	// Name is left empty on purpose. The local node's label is the only one
+	// the Client owns rather than the user, so the WebUI renders it from its
+	// own message catalogue (id === "local") instead of the Go side hard-
+	// coding one language. Registered backends keep their user-given names.
+	e := backendEntry{ID: "local", BaseURL: "http://" + net.JoinHostPort(host, port)}
 	if l.token != "" {
 		e.Token = l.token
 	}

@@ -8,6 +8,7 @@ package main
 // which read as "service down" on a dashboard.
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
@@ -119,7 +120,13 @@ func rocmSample() ([]gpuSample, error) {
 // break sampling. T1 (real-machine verification on the W7900 target) is
 // still open: the accepted key set must be confirmed there.
 func rocmSampleUncached() ([]gpuSample, error) {
-	out, err := exec.Command("rocm-smi", "--json",
+	// A hung rocm-smi would block every later metrics request behind
+	// rocmCache.mu, and through sampleFreestDevice it would take l.mu down
+	// with it (l.start holds it). Bound it exactly like nvidia-smi is bounded
+	// in devices.go.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "rocm-smi", "--json",
 		"--showuse", "--showmeminfo", "vram", "--showtemp", "--showpower", "--showproductname").Output()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok && len(ee.Stderr) > 0 {

@@ -1,11 +1,20 @@
 package main
 
 // §5.5 remote file browsing. This endpoint is a token-gated remote read of
-// the host filesystem, so it is confined to a whitelist: appDir plus every
-// directory the launcher has actually used in a runtime/tuning/quantization
-// config. Out-of-whitelist requests fail with 403 and never echo the
-// rejected path; symlinks are resolved before the check, so a link pointing
-// outside the whitelist cannot be followed.
+// the host filesystem, confined to a whitelist: the user's home directory,
+// appDir, and every directory the launcher has actually used in a
+// runtime/tuning/quantization config.
+//
+// Home is in that set deliberately (see allFSRoots): model trees routinely
+// live under ~/models and the picker has to open somewhere useful. So the
+// whitelist is a navigation boundary, not a secrecy one — anyone holding the
+// launcher token can enumerate names and sizes anywhere under $HOME. The
+// token, and the fact that this console is not meant to face the open
+// internet, are what protect this surface.
+//
+// Out-of-whitelist requests fail with 403 and never echo the rejected path;
+// symlinks are resolved before the check, so a link pointing outside the
+// whitelist cannot be followed.
 
 import (
 	"encoding/json"
@@ -22,9 +31,9 @@ import (
 const fsRootsFile = "launcher_fs_roots.json"
 
 type fsWhitelist struct {
-	mu    sync.Mutex
-	file  string
-	roots []string // persisted roots seen across restarts
+	mu     sync.Mutex
+	file   string
+	roots  []string // persisted roots seen across restarts
 	loaded bool
 }
 

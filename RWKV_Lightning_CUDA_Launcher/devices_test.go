@@ -1,6 +1,11 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -34,8 +39,8 @@ func TestParseDeviceSet(t *testing.T) {
 func TestDevicesOverlap(t *testing.T) {
 	explicit := func(spec string) resolvedDevices { return resolvedDevices{spec: spec, explicit: true} }
 	cases := []struct {
-		a, b  resolvedDevices
-		over  bool
+		a, b   resolvedDevices
+		over   bool
 		reason string
 	}{
 		{explicit("0"), explicit("1"), false, "disjoint cards must run in parallel"},
@@ -253,4 +258,186 @@ func hasTuneCacheArg(args []string) bool {
 		}
 	}
 	return false
+}
+
+// visible_devices must not inherit across starts. Every other field does
+// (start decodes onto the saved config), but an absent visible_devices means
+// "resolve through the §5.8 chain" — inheriting the previous pin would make
+// auto placement unreachable once a card had been named once.
+func TestStartDoesNotInheritVisibleDevices(t *testing.T) {
+	// Nothing inherited from the host, so a nil request falls all the way to
+	// auto placement — which is exactly what we use as the probe.
+	for _, name := range deviceEnvVars {
+		t.Setenv(name, "")
+	}
+	restore := autoDeviceSpec
+	defer func() { autoDeviceSpec = restore }()
+
+	// runtimeAction refuses outright in client form, so give this launcher a
+	// runtime binary to be an agent for (same trick as the capability tests).
+	if err := os.WriteFile(backendExecutable(), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(backendExecutable()) })
+
+	pinned := "1"
+	newPinnedLauncher := func() *launcher {
+		l := newLauncher()
+		l.config = startRequest{ModelPath: "/data/model.pth", Port: "8000", VisibleDevices: &pinned}
+		return l
+	}
+	// Call runtimeAction directly: routing through handler() would hit
+	// agentGate first, since a test binary has no runtime next to it.
+	post := func(l *launcher, action, body string) {
+		t.Helper()
+		r := httptest.NewRequest("POST", "http://127.0.0.1:10721/api/v1/runtime/"+action,
+			strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		_ = l.runtimeAction(action, w, r)
+		// The start fails at launch (no runtime binary); device resolution has
+		// already happened by then, which is all this test observes.
+	}
+
+	// A body with no visible_devices key — exactly what the picker's auto
+	// mode sends, since applyDevice() deletes the field. Auto placement must
+	// run; before the fix the saved "1" was inherited and it never did.
+	sampled := false
+	autoDeviceSpec = func() string { sampled = true; return "7" }
+	post(newPinnedLauncher(), "start", `{"model_path":"/nope/missing.pth","port":"8000"}`)
+	if !sampled {
+		t.Fatal("an omitted visible_devices inherited the saved pin instead of falling through to the §5.8 chain")
+	}
+
+	// An explicit spec in the body still wins over auto placement.
+	sampled = false
+	post(newPinnedLauncher(), "start", `{"model_path":"/nope/missing.pth","visible_devices":"0"}`)
+	if sampled {
+		t.Fatal("an explicit visible_devices must not fall through to auto placement")
+	}
+
+	// restart keeps the saved config, card included: it is the same runtime.
+	sampled = false
+	post(newPinnedLauncher(), "restart", "")
+	if sampled {
+		t.Fatal("restart must reuse the saved card, not re-run auto placement")
+	}
+}
+
+// rwkv_quantize is a CPU tool (tools/CMakeLists.txt links neither
+// rwkv::backend nor the CUDA includes), so the Agent must not apply the
+// --card pin to it and must not sample free VRAM on its behalf.
+func TestQuantizationIsCPUOnly(t *testing.T) {
+	for _, name := range deviceEnvVars {
+		t.Setenv(name, "")
+	}
+	restore := autoDeviceSpec
+	defer func() { autoDeviceSpec = restore }()
+
+	// Two guards sit in front of the device handling and would otherwise hide
+	// what this test checks: the client-only role check (needs a runtime
+	// binary present) and "quantizer is unavailable" (needs the tool itself).
+	for _, path := range []string{backendExecutable(), toolBinary("rwkv_quantize")} {
+		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { os.Remove(path) })
+	}
+
+	dir := t.TempDir()
+	input := filepath.Join(dir, "model.pth")
+	if err := os.WriteFile(input, []byte("m"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	body := func(devices *string) *http.Request {
+		payload, err := json.Marshal(quantizeRequest{
+			InputPath:      input,
+			OutputPath:     filepath.Join(dir, "model.rwkvq"),
+			Format:         "w8a16",
+			VisibleDevices: devices,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := httptest.NewRequest("POST", "http://127.0.0.1:10721/api/v1/jobs/quantization",
+			bytes.NewReader(payload))
+		r.Header.Set("Content-Type", "application/json")
+		return r
+	}
+
+	// A --card pin must not refuse a CPU job that names another card.
+	other := "1"
+	l := newLauncher()
+	l.card = "0"
+	autoDeviceSpec = func() string { t.Error("quantization sampled free VRAM"); return "" }
+	err := l.handleQuantizationStart(httptest.NewRecorder(), body(&other))
+	t.Cleanup(func() { _ = l.quantization.stop() })
+	if err != nil && strings.Contains(err.Error(), "pinned to GPU") {
+		t.Fatalf("a CPU job was refused by the --card pin: %v", err)
+	}
+
+	// And a silent request must not trigger free-VRAM placement either: the
+	// autoDeviceSpec stub above fails the test if it is ever called.
+	l2 := newLauncher()
+	if err := l2.handleQuantizationStart(httptest.NewRecorder(), body(nil)); err != nil &&
+		strings.Contains(err.Error(), "pinned to GPU") {
+		t.Fatalf("unexpected pin refusal: %v", err)
+	}
+	t.Cleanup(func() { _ = l2.quantization.stop() })
+
+	// The CLI never carries a device selection.
+	args, err := quantizationArgs(quantizeRequest{
+		InputPath: input, OutputPath: filepath.Join(dir, "b.rwkvq"),
+		Format: "w8a16", VisibleDevices: &other,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range args {
+		if a == "1" || strings.Contains(a, "device") || strings.Contains(a, "visible") {
+			t.Fatalf("quantization args carry a device selection: %v", args)
+		}
+	}
+}
+
+// A missed ROCm memory key must not wrap the free-VRAM subtraction and pin
+// every auto-placed process onto a phantom card.
+func TestPickFreestDeviceSurvivesMissingTotal(t *testing.T) {
+	gpus := []gpuSample{
+		{Index: 0, MemoryTotalBytes: 24 << 30, MemoryUsedBytes: 1 << 30},
+		// rocmNumber returns 0 for a key it cannot match: total 0, used 8 GiB.
+		{Index: 1, MemoryTotalBytes: 0, MemoryUsedBytes: 8 << 30},
+	}
+	if got := pickFreestDevice(gpus); got != "0" {
+		t.Fatalf("picked %q; a zero total must clamp to 0 free, not wrap to 2^64", got)
+	}
+}
+
+// The card-bound tune cache implies a one-off retune; say so in the log.
+func TestTuneCacheNote(t *testing.T) {
+	dir := t.TempDir()
+	req := startRequest{
+		ModelPath:   filepath.Join(dir, "rwkv7-g1i.pth"),
+		StateDBPath: filepath.Join(dir, "sessions.db"),
+	}
+	dev := resolvedDevices{spec: "1", explicit: true}
+
+	note := tuneCacheNote(req, dev)
+	if note == "" || !strings.Contains(note, "retune") {
+		t.Fatalf("missing cache should announce a retune, got %q", note)
+	}
+
+	// Once the cache exists there is nothing to announce.
+	if err := os.WriteFile(deviceTuneCache(req, dev), []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if note := tuneCacheNote(req, dev); note != "" {
+		t.Fatalf("existing cache must stay quiet, got %q", note)
+	}
+
+	// An explicit --tune-cache is the caller's business.
+	req.TuneCache = "/somewhere/custom.tune"
+	if note := tuneCacheNote(req, resolvedDevices{spec: "2", explicit: true}); note != "" {
+		t.Fatalf("explicit tune_cache must stay quiet, got %q", note)
+	}
 }
