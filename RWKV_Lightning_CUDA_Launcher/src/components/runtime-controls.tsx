@@ -34,6 +34,9 @@ function useActions() {
     t,
     busy,
     running: Boolean(runtime?.running),
+    // An unmanaged runtime (started outside this launcher) is reported ready
+    // but is not ours to stop, and starting again would fight over the port.
+    unmanaged: runtime?.managed === false,
     // An inference-only or unreachable node cannot be controlled at all.
     disabled: !backendId || !hasAgent || !backend?.reachable,
     canStart: Boolean(form.model_path.trim()),
@@ -61,7 +64,13 @@ export function RuntimeControls({
         <Button
           variant="default"
           size={size}
-          disabled={actions.disabled || actions.busy || actions.running || !actions.canStart}
+          disabled={
+            actions.disabled ||
+            actions.busy ||
+            actions.running ||
+            actions.unmanaged ||
+            !actions.canStart
+          }
           onClick={() => void actions.start()}
         >
           <Play className="size-3.5" />
@@ -69,7 +78,12 @@ export function RuntimeControls({
         </Button>
         <Button
           size={size}
-          disabled={actions.disabled || actions.busy || !actions.running}
+          disabled={
+            actions.disabled ||
+            actions.busy ||
+            !actions.running ||
+            actions.unmanaged
+          }
           onClick={() => void actions.stop()}
         >
           <Square className="size-3.5" />
@@ -77,7 +91,12 @@ export function RuntimeControls({
         </Button>
         <Button
           size={size}
-          disabled={actions.disabled || actions.busy || !actions.running}
+          disabled={
+            actions.disabled ||
+            actions.busy ||
+            !actions.running ||
+            actions.unmanaged
+          }
           onClick={() => void actions.restart()}
         >
           <RotateCcw className="size-3.5" />

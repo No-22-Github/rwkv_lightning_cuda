@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -376,5 +377,50 @@ func TestTwoHopBrowserControl(t *testing.T) {
 	forwardToBackend(w, r, bad, "api/v1/runtime/stop")
 	if w.Code != 401 {
 		t.Fatalf("bad Agent token accepted: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// A runtime started outside this launcher (by hand, or by another tool) used
+// to read as "offline" forever: the /v1/server/status probe only ran for
+// processes the Agent spawned itself. The Agent must report what it can see,
+// flagged managed=false, and keep "offline" when the port is dark.
+func TestExternalRuntimeIsReportedReady(t *testing.T) {
+	l := newLauncher()
+	native := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"status":"running","model":{"name":"test-model"}}`)
+	}))
+	defer native.Close()
+	u, _ := url.Parse(native.URL)
+	l.config.Port = u.Port()
+
+	out := l.status()
+	if out["status"] != "ready" {
+		t.Fatalf("external server reported %v, want ready", out["status"])
+	}
+	if managed, _ := out["managed"].(bool); managed {
+		t.Fatal("external server reported as managed")
+	}
+	if out["running"] != true {
+		t.Fatalf("running=%v, want true for a serving runtime", out["running"])
+	}
+
+	// --client-only keeps the legacy contract: no probing, never "ready".
+	client := newLauncher()
+	client.clientOnly = true
+	client.config.Port = u.Port()
+	if out := client.status(); out["status"] == "ready" {
+		t.Fatal("client-only launcher reported an external runtime as ready")
+	}
+
+	// Dark port: back to plain offline, no phantom readiness.
+	dark := newLauncher()
+	unused, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dark.config.Port = fmt.Sprint(unused.Addr().(*net.TCPAddr).Port)
+	unused.Close()
+	if out := dark.status(); out["status"] != "offline" {
+		t.Fatalf("dark port reported %v, want offline", out["status"])
 	}
 }

@@ -404,7 +404,18 @@ func (l *launcher) status() map[string]any {
 	out["translation_adapter"] = true
 	out["available"] = l.agentCapable()
 	out["visible_devices"] = devices.spec
-	if out["running"] == true && out["status"] != "stopping" {
+	// A runtime the Agent did not spawn itself (started by hand or by another
+	// launcher) used to read as "offline" forever: the /v1/server/status probe
+	// only ran for managed processes. Probe the configured port regardless, so
+	// an external server shows up as ready — with managed=false, since
+	// stop/restart cannot act on a process we do not own.
+	managed, _ := out["running"].(bool)
+	out["managed"] = managed
+	// A Client cannot start a runtime, so it has no port worth probing: keep
+	// its status payload a pure reflection of process state (§6.1 contract).
+	// Gate on the explicit --client-only flag, not role(): a host missing the
+	// native binary is still exactly where someone starts the server by hand.
+	if !l.clientOnly && out["status"] != "stopping" {
 		client := http.Client{Timeout: 1500 * time.Millisecond}
 		resp, err := client.Get("http://127.0.0.1:" + config.Port + "/v1/server/status")
 		if err == nil {
@@ -416,6 +427,7 @@ func (l *launcher) status() map[string]any {
 			}
 		}
 	}
+	out["running"] = out["status"] == "ready" || out["status"] == "running"
 	if out["status"] == "completed" {
 		out["status"] = "offline"
 	}

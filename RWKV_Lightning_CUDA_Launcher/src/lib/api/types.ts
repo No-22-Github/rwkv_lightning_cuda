@@ -96,6 +96,12 @@ export interface RuntimeState extends ProcessStatus {
   available: boolean;
   visible_devices: string;
   backend?: Record<string, unknown>;
+  /**
+   * False when the ready runtime was started outside this launcher (the
+   * Agent only reports what it can see, it cannot stop a process it does
+   * not own) — stop/restart must be disabled, start is port-conflicted.
+   */
+  managed?: boolean;
 }
 
 export interface NodeInfo extends RuntimeState {

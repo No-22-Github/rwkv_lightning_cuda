@@ -39,9 +39,13 @@ export function runtimeTone(runtime?: RuntimeState): StatusTone {
 }
 
 export function runtimeLabel(t: TFn, runtime?: RuntimeState) {
+  if (runtime?.status === "ready") {
+    // The Agent detects a runtime it did not spawn, but cannot manage it.
+    return runtime.managed === false
+      ? t("status.runtimeExternal")
+      : t("status.runtimeReady");
+  }
   switch (runtime?.status) {
-    case "ready":
-      return t("status.runtimeReady");
     case "starting":
       return t("status.starting");
     case "stopping":
@@ -57,7 +61,12 @@ export function runtimeLabel(t: TFn, runtime?: RuntimeState) {
   }
 }
 
-/** Overall node tone used by the rail dot and the node cards. */
+/**
+ * Overall node tone used by the rail dot and the node cards. Reachable but
+ * not serving is "warn", never "idle": a grey dot next to a live node reads
+ * as "no information", which is exactly the state a console exists to
+ * disambiguate — the runtime text right below carries the detail.
+ */
 export function nodeTone(
   backend: BackendView | undefined,
   runtime?: RuntimeState,
@@ -65,10 +74,15 @@ export function nodeTone(
 ): StatusTone {
   if (!backend?.reachable) return "bad";
   if (runtime?.status === "ready") return "ok";
-  if (jobsRunning || runtime?.status === "starting" || runtime?.status === "stopping")
+  if (runtime?.status === "error") return "bad";
+  if (
+    jobsRunning ||
+    runtime?.status === "starting" ||
+    runtime?.status === "stopping"
+  )
     return "warn";
   if (backend.kind === "inference_only") return "info";
-  return "idle";
+  return "warn";
 }
 
 /**

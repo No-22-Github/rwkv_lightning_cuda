@@ -27,9 +27,13 @@ export function Header() {
       <RailToggle />
 
       <div className="flex h-7 items-center gap-2 border-r border-border pr-3">
-        <span className="flex size-[22px] items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground">
-          R
-        </span>
+        {/* Black swan mark; invert keeps the silhouette visible on the dark
+            header (the source asset is a black-on-transparent cutout). */}
+        <img
+          src="/logo.png"
+          alt=""
+          className="size-[22px] object-contain dark:invert"
+        />
         <span className="text-[13.5px] font-semibold tracking-[-0.01em]">
           {t("app.name")}
         </span>
