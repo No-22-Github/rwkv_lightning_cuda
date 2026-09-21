@@ -2,8 +2,11 @@ node_modules/
 *.tsbuildinfo
 .bun-tmp/
 .bun-cache/
-!dist/
-!dist/**
+
+# Build artifact. CI regenerates it from source (bun run build) before
+# compiling Go, so a tracked copy is dead weight that conflicts on every
+# frontend change. `go build` fails loudly if you forget to build it first.
+dist/
 
 rwkv-lightning-launcher
 rwkv-lightning-launcher.exe

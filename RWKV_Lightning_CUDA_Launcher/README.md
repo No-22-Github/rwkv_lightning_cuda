@@ -68,7 +68,11 @@ rwkv_launcher --client                         # 控制台：仅 Client（本机
 
 `visible_devices`（字符串，如 `0`、`0,1`、空串=显式不注入）可出现在 Runtime / Tuning / Quantization 三个请求体里，优先级：请求体 > `--card` > 继承的 `CUDA_VISIBLE_DEVICES` > 不注入。训练与推理的互斥相应从全局改为按卡：显式选卡且设备集无交集时可并行，不可判定时保守拦截。
 
-`dist/` 是纯静态输出，使用 `//go:embed dist/*` 编入 Go 二进制。生产环境不需要 Bun 或 Node.js。仓库中保留生成的 `dist/`，CI 会使用锁文件重新安装依赖、测试并构建前端，再编译 Go 并将 `dist/` 放入发布目录；修改前端后必须重新执行 `bun run build`，将源码、锁文件和更新后的 `dist/` 一起提交。
+`dist/` 是纯静态输出，使用 `//go:embed dist/*` 编入 Go 二进制。生产环境不需要 Bun 或 Node.js。
+
+`dist/` **不入库**，它是构建产物：CI 会使用锁文件重新安装依赖、跑 lint/test、执行 `bun run build`，然后才编译 Go，所以仓库里放一份只会在每次前端改动时产生无意义的二进制冲突。代价是 `go build` 之前必须先 `bun run build`——忘了的话 `//go:embed dist/*` 会直接编译失败（`pattern dist/*: no matching files found`），不会静默产出一个空壳二进制。
+
+字体同理：Geist 与 JetBrains Mono 以 `@fontsource-variable/*` 依赖形式安装，构建时产出 latin subset 的 variable woff2 到 `dist/assets/`，源码树与仓库里都不存放字体文件。二者自托管而非引 CDN，内网与离线机器上的观感才和设计稿一致。
 
 路由使用 `/#/chat`、`/#/translate`、`/#/state-tuning`、`/#/runtime`、`/#/settings`，无需服务端 SPA fallback。不要用 `file://` 打开 `dist/index.html`。
 
