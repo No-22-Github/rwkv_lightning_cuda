@@ -34,6 +34,19 @@ export const runtimeApi = {
       { body: {} },
     ),
 
+  /**
+   * Hand a .pth that already sits on the node to the runtime's multipart
+   * upload. The native API registers an *adapter* from a server-side path but
+   * has no path form for a state, so the Agent does that hop
+   * (`state_import` capability).
+   */
+  importState: (backendId: string, path: string) =>
+    nodeRequest<{ state_id?: string }>(
+      backendId,
+      "/api/v1/runtime/state/import",
+      { body: { path } },
+    ),
+
   /** Card-switch load: restart on `visible_devices`, then (dynamic) load. */
   load: (backendId: string, body: RuntimeLoadRequest) =>
     nodeRequest<RuntimeLoadResponse>(backendId, "/api/v1/runtime/load", {

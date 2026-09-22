@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { Trash2 } from "lucide-react";
+import { HardDrive, Trash2 } from "lucide-react";
 import { inferenceApi } from "@/lib/api/inference";
+import { runtimeApi } from "@/lib/api/runtime";
 import type { UploadedState } from "@/lib/api/types";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,13 +12,16 @@ import {
   DialogHeader,
 } from "@/components/ui/dialog";
 import { Field } from "@/components/ui/field";
+import { FileDrop } from "@/components/ui/file-drop";
 import { Input } from "@/components/ui/input";
-import { Notice } from "@/components/ui/primitives";
-import { formatBytes } from "@/lib/format";
+import { Notice, Separator } from "@/components/ui/primitives";
+import { basename, formatBytes } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { hasCapability } from "@/stores/backends";
 import { useSettings } from "@/stores/settings";
-import { toast } from "@/stores/ui";
+import { toast, useUI } from "@/stores/ui";
+import { useCurrent } from "@/app/use-current";
 
 const describe = (cause: unknown) =>
   cause instanceof Error ? cause.message : String(cause);
@@ -39,6 +43,12 @@ export function StateManager({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
+  const [nodePath, setNodePath] = useState("");
+  const { backend } = useCurrent();
+  const openFsBrowser = useUI((s) => s.openFsBrowser);
+  // Importing from the node needs the Agent hop; older agents only take
+  // uploads from this computer.
+  const canImport = hasCapability(backend, "state_import");
 
   useEffect(() => {
     if (!open || !backendId) {
@@ -82,6 +92,26 @@ export function StateManager({
     }
   };
 
+  /** The .pth a tuning run produced lives on the node, not on this laptop. */
+  const importFromNode = async () => {
+    const path = nodePath.trim();
+    if (!backendId || !path) return;
+    setBusy(true);
+    try {
+      const state = await runtimeApi.importState(backendId, path);
+      if (state?.state_id) setGeneration({ state_id: state.state_id });
+      toast.success(
+        t("state.imported", { name: state?.state_id || basename(path) }),
+      );
+      setNodePath("");
+      setRevision((value) => value + 1);
+    } catch (cause) {
+      toast.error(t("toast.failed", { error: describe(cause) }));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const remove = async (state: UploadedState) => {
     if (!backendId) return;
     if (!window.confirm(t("state.deleteConfirm", { name: state.filename })))
@@ -110,17 +140,48 @@ export function StateManager({
           description={t("state.description")}
         />
         <DialogBody className="space-y-3">
-          <Field label={t("state.upload")}>
-            <Input
-              type="file"
+          <Field label={t("state.sourceLocal")}>
+            <FileDrop
               accept=".pth"
+              label={t("state.upload")}
               disabled={!backendId || busy}
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                event.target.value = "";
-                if (file) void upload(file);
-              }}
+              onFile={(file) => file && void upload(file)}
             />
+          </Field>
+
+          <Separator />
+
+          <Field
+            label={t("state.sourceNode")}
+            hint={canImport ? t("state.importHint") : undefined}
+          >
+            {canImport ? (
+              <div className="flex gap-2">
+                <Input
+                  value={nodePath}
+                  placeholder={t("fs.pathPlaceholder")}
+                  disabled={!backendId || busy}
+                  className="min-w-0 flex-1 font-mono text-xs"
+                  onChange={(event) => setNodePath(event.target.value)}
+                />
+                <Button
+                  disabled={!backendId || busy}
+                  onClick={() => openFsBrowser(setNodePath, nodePath)}
+                >
+                  <HardDrive className="size-3.5" />
+                  {t("common.browse")}
+                </Button>
+                <Button
+                  variant="default"
+                  disabled={!backendId || busy || !nodePath.trim()}
+                  onClick={() => void importFromNode()}
+                >
+                  {t("state.import")}
+                </Button>
+              </div>
+            ) : (
+              <Notice tone="info">{t("state.importUnsupported")}</Notice>
+            )}
           </Field>
 
           {error && <Notice tone="danger">{error}</Notice>}
@@ -180,7 +241,9 @@ export function StateManager({
                         {t("state.tensors")} {state.tensor_count}
                       </span>
                       <span>·</span>
-                      <span>{new Date(state.created * 1000).toLocaleString()}</span>
+                      <span>
+                        {new Date(state.created * 1000).toLocaleString()}
+                      </span>
                     </div>
                   </div>
                 );

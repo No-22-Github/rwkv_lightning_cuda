@@ -193,7 +193,7 @@ WebUI 使用 [新控制面 API](docs/control-plane-api.md)：浏览器只与本�
 
 控制面接口的完整路径表、schema 与安全模型见 [docs/control-plane-api.md](docs/control-plane-api.md)。所有 POST 都发送 JSON，失败返回实际 `{"error":"..."}` 与 HTTP 错误码。
 
-新控制面（`/api/v1`）：`/api/v1/node`、`/api/v1/node/metrics`、`/api/v1/node/fs`、`/api/v1/node/dialog/{file,directory,reveal}`、`/api/v1/runtime`（+ `start/stop/restart/logs`）、`/api/v1/jobs`（+ `/{id}`、`/tuning`、`/tuning/validate`、`/quantization`、`/{id}/stop`、`/{id}/logs`）、`/api/v1/backends`（Client：增删查 + `/{id}/probe` + `/{id}/api/v1/*`、`/{id}/v1/*` 转发）。
+新控制面（`/api/v1`）：`/api/v1/node`、`/api/v1/node/metrics`、`/api/v1/node/fs`、`/api/v1/node/dialog/{file,directory,reveal}`、`/api/v1/runtime`（+ `start/stop/restart/load/state/import/logs`）、`/api/v1/jobs`（+ `/{id}`、`/tuning`、`/tuning/validate`、`/quantization`、`/{id}/stop`、`/{id}/logs`）、`/api/v1/backends`（Client：增删查 + `/{id}/probe` + `/{id}/api/v1/*`、`/{id}/v1/*` 转发）。
 
 **没有旧路径 alias。** `/api/v1` 是唯一的控制面。pre-v1 的 `/api/status`、
 `/api/start`、`/api/stop`、`/api/restart`、`/api/tuning/*`、

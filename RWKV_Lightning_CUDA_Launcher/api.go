@@ -129,6 +129,9 @@ func (l *launcher) handler() http.Handler {
 		}
 		return l.runtimeAction("restart", w, r)
 	})
+	// The native API has no path form of /v1/state/upload; this is the hop
+	// that lets the console use a state file that lives on the node.
+	apiV1(mux, "POST /api/v1/runtime/state/import", l.handleStateImport)
 	mux.HandleFunc("/api/v1/runtime/logs", l.runtime.sse)
 
 	// ---- Jobs (Agent): tuning and quantization share the *process model —

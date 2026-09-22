@@ -11,6 +11,9 @@ export const CAPABILITIES = [
   "quantization",
   "metrics",
   "fs",
+  // The Agent can hand a node-local .pth to the runtime's multipart state
+  // upload — a hop the native API has no path form for.
+  "state_import",
   "host_dialog",
   "inference",
 ] as const;

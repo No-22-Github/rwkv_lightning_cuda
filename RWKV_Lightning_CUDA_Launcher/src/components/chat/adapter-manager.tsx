@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Trash2 } from "lucide-react";
+import { HardDrive, Trash2 } from "lucide-react";
 import { adapterIDFromFilename } from "@/lib/api/client";
 import { inferenceApi } from "@/lib/api/inference";
 import type { AdapterEntry, AdapterListResponse } from "@/lib/api/types";
@@ -12,13 +12,14 @@ import {
   DialogHeader,
 } from "@/components/ui/dialog";
 import { Field } from "@/components/ui/field";
+import { FileDrop } from "@/components/ui/file-drop";
 import { Input } from "@/components/ui/input";
 import { Notice, Separator } from "@/components/ui/primitives";
 import { formatBytes } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { useSettings } from "@/stores/settings";
-import { toast } from "@/stores/ui";
+import { toast, useUI } from "@/stores/ui";
 
 const describe = (cause: unknown) =>
   cause instanceof Error ? cause.message : String(cause);
@@ -44,6 +45,7 @@ export function AdapterManager({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
+  const openFsBrowser = useUI((s) => s.openFsBrowser);
 
   const entries = listing?.data ?? [];
 
@@ -76,7 +78,11 @@ export function AdapterManager({
 
   /** Selecting an adapter always drops any stale scale override. */
   const select = (id: string, version: string) =>
-    setGeneration({ adapter_id: id, adapter_version: version, adapter_scale: "" });
+    setGeneration({
+      adapter_id: id,
+      adapter_version: version,
+      adapter_scale: "",
+    });
 
   const registered = (id: string, version: string) => {
     select(id, version);
@@ -170,14 +176,26 @@ export function AdapterManager({
           <Separator />
 
           <div className="space-y-2">
+            {/* The native API registers an adapter straight from a path on
+                the node, so browsing the node's filesystem is the direct
+                route for a checkpoint the trainer just wrote. */}
             <Field label={t("adapter.registerPath")}>
-              <Input
-                className="font-mono"
-                value={path}
-                placeholder={t("fs.pathPlaceholder")}
-                disabled={!backendId || busy}
-                onChange={(event) => setPath(event.target.value)}
-              />
+              <div className="flex gap-2">
+                <Input
+                  className="min-w-0 flex-1 font-mono text-xs"
+                  value={path}
+                  placeholder={t("fs.pathPlaceholder")}
+                  disabled={!backendId || busy}
+                  onChange={(event) => setPath(event.target.value)}
+                />
+                <Button
+                  disabled={!backendId || busy}
+                  onClick={() => openFsBrowser(setPath, path)}
+                >
+                  <HardDrive className="size-3.5" />
+                  {t("common.browse")}
+                </Button>
+              </div>
             </Field>
             <Field label={t("adapter.id")}>
               <Input
@@ -207,27 +225,29 @@ export function AdapterManager({
                 onChange={(event) => setUploadId(event.target.value)}
               />
             </Field>
-            <Field label={t("adapter.uploadPth")}>
-              <Input
-                type="file"
-                accept=".pth"
+            {/* Metadata first: it is attached to the upload, so picking the
+                .pth must stay the last action — it is what starts it. */}
+            <Field label={t("adapter.uploadJson")} hint={t("common.optional")}>
+              <FileDrop
+                accept=".json"
+                label={t("adapter.uploadJson")}
+                file={metadata}
                 disabled={!backendId || busy}
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  event.target.value = "";
+                onFile={setMetadata}
+              />
+            </Field>
+            <Field label={t("adapter.uploadPth")}>
+              <FileDrop
+                accept=".pth"
+                label={t("adapter.uploadPth")}
+                disabled={!backendId || busy}
+                onFile={(file) => {
                   if (!file) return;
-                  const id = uploadId.trim() || adapterIDFromFilename(file.name);
+                  const id =
+                    uploadId.trim() || adapterIDFromFilename(file.name);
                   setUploadId(id);
                   void upload(file, id);
                 }}
-              />
-            </Field>
-            <Field label={t("adapter.uploadJson")}>
-              <Input
-                type="file"
-                accept=".json"
-                disabled={!backendId || busy}
-                onChange={(event) => setMetadata(event.target.files?.[0])}
               />
             </Field>
           </div>

@@ -118,7 +118,7 @@ func TestCapabilitiesAndNodePayload(t *testing.T) {
 		t.Fatalf("role: %s", l.role())
 	}
 	caps := l.capabilities()
-	want := []string{"runtime", "tuning_state", "tuning_miss", "quantization", "metrics", "fs", "host_dialog"}
+	want := []string{"runtime", "tuning_state", "tuning_miss", "quantization", "metrics", "fs", "state_import", "host_dialog"}
 	if fmt.Sprint(caps) != fmt.Sprint(want) {
 		t.Fatalf("capabilities: %v", caps)
 	}

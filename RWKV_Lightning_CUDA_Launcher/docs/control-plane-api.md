@@ -67,6 +67,7 @@ Runtime / Tuning / Quantization 请求体集中定义在 `request_types.go`，�
 | POST | `/api/v1/runtime/stop` | 停止 | `/api/stop` |
 | POST | `/api/v1/runtime/restart` | 用实际运行配置重启 | `/api/restart` |
 | POST | `/api/v1/runtime/load` | 选卡（重）加载：停止 → 以 `visible_devices` 重启 → 等就绪 →（动态模式）加载模型 | — |
+| POST | `/api/v1/runtime/state/import` | 把节点本地 `.pth` 交给推理服务的 multipart `/v1/state/upload` | — |
 | GET | `/api/v1/runtime/logs` | SSE 日志流 | 已移除 |
 
 ### 任务（Agent）
@@ -145,7 +146,7 @@ Client 与 Agent **必须同版本部署**。曾经存在的旧协议适配层�
 {
   "role": "agent",
   "version": "1.7.5",
-  "capabilities": ["runtime", "tuning_state", "tuning_miss", "quantization", "metrics", "fs", "host_dialog"],
+  "capabilities": ["runtime", "tuning_state", "tuning_miss", "quantization", "metrics", "fs", "state_import", "host_dialog"],
   "available": true,
   "visible_devices": "",
   "card": "0"
@@ -277,7 +278,7 @@ loading on "…" is refused`），runtime/tuning/quantization/`runtime/load` 四
 | 项 | 决议 |
 | --- | --- |
 | T1 metrics 字段表 | schema 见上节（§6.3 已定稿）。NVML 字段全量可取（index/name/mem/util/temp/power，可选字段缺失即省略）。**rocm-smi 的实际 key 集合仍需在 W7900 目标机上确认**：解析按 key 后缀匹配（`VRAM Total Memory (B)`、`GPU use (%)`、`Temperature (Sensor junction|edge) (C)`、`Average Graphics Package Power (W)`、`Card series`），上机后如 label 有出入只需调 `metrics.go` 的后缀表 |
-| T2 capabilities 初始清单 | `runtime` / `tuning_state` / `tuning_miss` / `quantization` / `metrics` / `fs` / `host_dialog`（仅本机全套）。量化**不**按 w8a16/w4a16 拆位：一个 `rwkv_quantize` 二进制同时支持两种 format，format 是任务参数不是部署属性 |
+| T2 capabilities 初始清单 | `runtime` / `tuning_state` / `tuning_miss` / `quantization` / `metrics` / `fs` / `state_import` / `host_dialog`（仅本机全套）。量化**不**按 w8a16/w4a16 拆位：一个 `rwkv_quantize` 二进制同时支持两种 format，format 是任务参数不是部署属性 |
 | T3 token 生成与分发 | 由操作者经 `--token` 显式提供，不自动生成（自动生成的 token 会进启动日志）。存储位置：只存在于启动参数/进程内，不落盘。轮换：用新 token 重启 Agent，再在各 Client 上删除再注册对应后端（当前没有更新接口，ID 会变化） |
 | T4 Client 配置文件位置 | `~/.rwkv_launcher/launcher.json`（macOS/Linux `$HOME`，Windows `%USERPROFILE%`），权限 0600，`--config` 可覆盖。理由：注册表是用户级状态，必须活过 launcher 二进制升级与「每卡一个文件夹」的整目录替换；appDir 会随构建/部署位置漂移 |
 
@@ -305,7 +306,19 @@ body：`{ "model": "<动态模式模型 ID，可省略>", "visible_devices": "<�
 动态模式下若给了 `model` 则带认证调用 `/v1/model/load`（15 分钟上限）。响应
 `{ "ok": true, "visible_devices": "<实际钉定串>", "model": "<已加载模型或空串>" }`。
 选卡串写入保存的配置，之后的 restart 沿用该卡。CUDA 在进程初始化时绑定设备，因此换卡
-必然中断活跃推理——这是接口契约，不是缺陷。前端入口：Chat 页右栏「模型与显卡」。
+必然中断活跃推理——这是接口契约，不是缺陷。当前 WebUI 不再调用它：选卡与重启都在
+「推理服务」页完成（`runtime/start` 带 `visible_devices`），该路径保留给其他客户端。
+
+#### `POST /api/v1/runtime/state/import`
+
+body：`{ "path": "<节点上的 .pth 绝对路径>" }`。原生 API 能从服务端路径注册 **adapter**
+（`POST /v1/adapters {adapter_id, path}`），但 **state 只有 multipart 上传**，没有路径形式。
+于是这一跳由 Agent 补：按 §5.5 白名单解析路径（越界 403 且不回显路径）→ 校验是普通文件、
+非空、`.pth`、不超过原生 512 MiB 上限 → 以流式 multipart POST 到本机推理服务
+`/v1/state/upload`（multipart 用 Bearer 头鉴权，不读 JSON `password`）→ **原样转发**推理服务的
+状态码与响应体，使「已存在」「不是 state 归档」这类拒绝以原生措辞抵达前端。
+
+能力位：`state_import`。没有该位的旧 Agent 上，WebUI 隐藏「从节点路径导入」，只留本机上传。
 
 | 字段 | JSON 类型 | 含义 / 校验 |
 | --- | --- | --- |

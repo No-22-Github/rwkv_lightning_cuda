@@ -382,7 +382,10 @@ func (l *launcher) capabilities() []string {
 	if binaryPresent(toolBinary("rwkv_quantize")) {
 		caps = append(caps, "quantization")
 	}
-	caps = append(caps, "metrics", "fs")
+	// state_import: this Agent can hand a node-local .pth to the runtime's
+	// multipart upload, which the native API offers no path form of. The
+	// console hides the "import from this node" control on agents without it.
+	caps = append(caps, "metrics", "fs", "state_import")
 	if l.role() == "full" {
 		caps = append(caps, "host_dialog")
 	}
