@@ -57,6 +57,11 @@ class PublishTests(unittest.TestCase):
         with patch.object(self.publisher, "api", side_effect=[GitHubError("HTTP 404"), [draft]]):
             self.assertEqual(self.publisher.release(), draft)
 
+    def test_orphan_draft_found_by_name_when_tag_name_is_placeholder(self):
+        draft = {"id": 43, "draft": True, "tag_name": "untagged-abc123", "name": "v1.4.1"}
+        with patch.object(self.publisher, "api", side_effect=[GitHubError("HTTP 404"), [draft]]):
+            self.assertEqual(self.publisher.release(), draft)
+
     def test_upload_uses_url_and_cleans_failed_asset_on_retry(self):
         release = {"id": 42, "upload_url": "https://uploads.github.com/repos/owner/repo/releases/42/assets{?name,label}"}
         with tempfile.TemporaryDirectory() as tmp:
@@ -80,7 +85,7 @@ class PublishTests(unittest.TestCase):
         with patch("publish_release.gh", return_value=""):
             self.assertIsNone(self.publisher.api("releases/assets/7", method="DELETE"))
 
-    def run_publish(self, upload_failure=False):
+    def run_publish(self, upload_failure=False, draft_tag_name="v1.4.1"):
         calls = []
         def api(path, payload=None, method="GET"):
             calls.append((path, payload, method))
@@ -92,7 +97,8 @@ class PublishTests(unittest.TestCase):
             (directory / "package.zip").write_bytes(b"package")
             (directory / "package.zip.sha256").write_text("checksum")
             with patch.object(self.publisher, "ensure_tag"), patch.object(
-                self.publisher, "ensure_draft", return_value={"id": 42, "draft": True}
+                self.publisher, "ensure_draft",
+                return_value={"id": 42, "draft": True, "tag_name": draft_tag_name},
             ), patch.object(self.publisher, "api", side_effect=api), patch(
                 "publish_release.Publisher.upload_asset", side_effect=GitHubError("HTTP 500") if upload_failure else None
             ):
@@ -102,6 +108,20 @@ class PublishTests(unittest.TestCase):
                 else:
                     self.publisher.publish(directory)
         return calls
+
+    def test_placeholder_tag_is_renamed_before_publish(self):
+        calls = self.run_publish(draft_tag_name="untagged-abc123")
+        rename = ("releases/42", {"tag_name": "v1.4.1"}, "PATCH")
+        publish = ("releases/42", {"draft": False, "make_latest": "true"}, "PATCH")
+        self.assertIn(rename, calls)
+        self.assertLess(calls.index(rename), calls.index(publish))
+
+    def test_correctly_named_draft_is_not_renamed(self):
+        calls = self.run_publish()
+        self.assertFalse(any(
+            path == "releases/42" and method == "PATCH" and payload and "tag_name" in payload
+            for path, payload, method in calls
+        ))
 
     def test_notes_failure_does_not_prevent_publication(self):
         calls = self.run_publish()

@@ -66,8 +66,12 @@ class Publisher:
         release = self.lookup(f"releases/tags/{quote(self.tag, safe='')}")
         if release is not None:
             return release
-        # Tag lookup can omit drafts. Authenticated listing includes accessible drafts.
-        return next((r for r in self.pages("releases") if r["tag_name"] == self.tag), None)
+        # Tag lookup can omit drafts. Authenticated listing includes accessible
+        # drafts; match interrupted ones by name too, because a draft can sit on
+        # an "untagged-<hex>" placeholder tag_name that never equals the target.
+        return next((r for r in self.pages("releases")
+                     if r["tag_name"] == self.tag
+                     or (r["draft"] and r["name"] == self.tag)), None)
 
     def pages(self, path):
         page = 1
@@ -130,6 +134,12 @@ class Publisher:
         self.ensure_tag()
         release = self.ensure_draft()
         release_path = f"releases/{release['id']}"
+        # Drafts can carry an "untagged-<hex>" placeholder tag_name when the
+        # tag ref is not visible at draft time. Carry the real tag over before
+        # publishing, or the release lands on the placeholder tag and the next
+        # run publishes this version again.
+        if release.get("tag_name") != self.tag:
+            retry(lambda: self.api(release_path, {"tag_name": self.tag}, "PATCH"))
         if not release.get("body"):
             try:
                 notes = retry(lambda: self.api("releases/generate-notes", {

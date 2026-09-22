@@ -111,7 +111,11 @@ Assets are uploaded through the REST `upload_url` returned by the release API,
 using its numeric release ID rather than resolving the tag again through
 `gh release upload`. Same-name assets (including incomplete uploads) are removed
 before retrying. Tag lookup also falls back to paginated release listing to find
-existing drafts. Uploads are checked for completed state and file size.
+existing drafts, matching interrupted drafts by release name when they sit on an
+`untagged-<hex>` placeholder tag; that placeholder is renamed back to the real
+tag before publishing, otherwise the published release lands on the placeholder
+tag and the next push publishes the same version again.
+Uploads are checked for completed state and file size.
 The release remains a draft if
 any upload fails. Already published releases are never overwritten.
 
