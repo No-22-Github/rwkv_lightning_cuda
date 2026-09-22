@@ -3,6 +3,7 @@ import { AddBackendDialog } from "@/components/add-backend-dialog";
 import { FsBrowserDialog } from "@/components/fs-browser-dialog";
 import { Toaster } from "@/components/ui/toaster";
 import { Header } from "@/app/header";
+import { LogDock } from "@/app/log-dock";
 import { Rail } from "@/app/rail";
 import { useCurrent } from "@/app/use-current";
 import { tNow, useI18n } from "@/lib/i18n";
@@ -18,7 +19,7 @@ import { useBackends } from "@/stores/backends";
 import { useLogs } from "@/stores/logs";
 import { useNodes } from "@/stores/nodes";
 import { resolveTheme, useSettings } from "@/stores/settings";
-import { toast } from "@/stores/ui";
+import { toast, useLogDock } from "@/stores/ui";
 
 /** Keeps `data-theme`, `color-scheme` and the browser chrome colour in sync. */
 function useThemeEffect() {
@@ -89,6 +90,20 @@ function useLogStreamScope(backendId: string) {
   }, [backendId, closeBackend]);
 }
 
+/** ⌘⇧L / Ctrl+⇧+L toggles the log console from anywhere. */
+function useLogShortcut() {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!event.shiftKey || !(event.metaKey || event.ctrlKey)) return;
+      if (event.key.toLowerCase() !== "l") return;
+      event.preventDefault();
+      useLogDock.getState().toggle();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+}
+
 function useStorageErrorNotice() {
   useEffect(() => {
     const onError = () =>
@@ -108,6 +123,7 @@ export function App() {
   useRegistryPolling();
   useNodePolling(backendId);
   useLogStreamScope(backendId);
+  useLogShortcut();
   useStorageErrorNotice();
 
   return (
@@ -115,15 +131,18 @@ export function App() {
       <Header />
       <div className="flex min-h-0">
         <Rail />
-        <main className="min-w-0 flex-1 overflow-auto bg-background">
-          {route === "nodes" && <NodesPage />}
-          {route === "chat" && <ChatPage />}
-          {route === "translate" && <TranslatePage />}
-          {route === "runtime" && <RuntimePage />}
-          {route === "training" && <TrainingPage />}
-          {route === "quant" && <QuantizationPage />}
-          {route === "settings" && <SettingsPage />}
-        </main>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <main className="min-h-0 flex-1 overflow-auto bg-background">
+            {route === "nodes" && <NodesPage />}
+            {route === "chat" && <ChatPage />}
+            {route === "translate" && <TranslatePage />}
+            {route === "runtime" && <RuntimePage />}
+            {route === "training" && <TrainingPage />}
+            {route === "quant" && <QuantizationPage />}
+            {route === "settings" && <SettingsPage />}
+          </main>
+          <LogDock />
+        </div>
       </div>
 
       {backend && !backend.reachable && error && (

@@ -36,7 +36,7 @@ Object.defineProperty(globalThis, "window", {
 
 const { useBackends } = await import("../src/stores/backends");
 const { useNodes } = await import("../src/stores/nodes");
-const { useChat } = await import("../src/stores/chat");
+const { useChat, currentThread } = await import("../src/stores/chat");
 const { useTranslate } = await import("../src/stores/translate");
 const { useSettings, useSecret } = await import("../src/stores/settings");
 const {
@@ -347,11 +347,11 @@ describe("chat streaming", () => {
     expect(call?.body?.messages).toEqual([
       { role: "user", content: "Say hello" },
     ]);
-    const thread = useChat.getState().threads[backend.id];
+    const thread = currentThread(backend.id);
     expect(thread).toHaveLength(2);
     expect(thread[1].content).toBe("answer");
     expect(useChat.getState().active).toBeNull();
-    expect(values.get("rwkv-chat-v2")).toContain("answer");
+    expect(values.get("rwkv-chat-v3")).toContain("answer");
   });
 
   it("sends the selected state, thinking mode and MiSS adapter", async () => {
@@ -379,15 +379,17 @@ describe("chat streaming", () => {
     capture();
     await useChat.getState().send(backend.id, "Say hello");
     await useChat.getState().send(backend.id, "", true);
-    const thread = useChat.getState().threads[backend.id];
+    const thread = currentThread(backend.id);
     expect(thread).toHaveLength(2);
-    expect(thread.filter((message) => message.role === "user")).toHaveLength(1);
+    expect(
+      thread.filter((message: { role: string }) => message.role === "user"),
+    ).toHaveLength(1);
   });
 
   it("keeps partial output and reports a stream that ends before [DONE]", async () => {
     fetchSpy.mockImplementation(async () => sseStream("partial", false));
     await useChat.getState().send(backend.id, "hi");
-    const reply = useChat.getState().threads[backend.id][1];
+    const reply = currentThread(backend.id)[1];
     expect(reply.content).toBe("partial");
     expect(reply.error).toContain("disconnected");
   });
@@ -396,8 +398,81 @@ describe("chat streaming", () => {
     capture();
     await useChat.getState().send("a1b2c3", "first");
     await useChat.getState().send("local", "second");
-    expect(useChat.getState().threads.a1b2c3[0].content).toBe("first");
-    expect(useChat.getState().threads.local[0].content).toBe("second");
+    expect(currentThread("a1b2c3")[0].content).toBe("first");
+    expect(currentThread("local")[0].content).toBe("second");
+  });
+});
+
+describe("log dock", () => {
+  it("opens on the stream a page asks for and clamps a dragged height", async () => {
+    const { useLogDock, MIN_DOCK_HEIGHT, MAX_DOCK_HEIGHT } = await import(
+      "../src/stores/ui"
+    );
+    useLogDock.getState().show("tuning");
+    expect(useLogDock.getState().open).toBe(true);
+    expect(useLogDock.getState().kind).toBe("tuning");
+
+    // show() without an argument keeps whichever stream was last read.
+    useLogDock.getState().hide();
+    useLogDock.getState().show();
+    expect(useLogDock.getState().kind).toBe("tuning");
+
+    useLogDock.getState().setHeight(10);
+    expect(useLogDock.getState().height).toBe(MIN_DOCK_HEIGHT);
+    useLogDock.getState().setHeight(10_000);
+    expect(useLogDock.getState().height).toBe(MAX_DOCK_HEIGHT);
+    useLogDock.getState().hide();
+  });
+});
+
+describe("chat history", () => {
+  it("keeps earlier conversations when a new one starts", async () => {
+    capture();
+    await useChat.getState().send(backend.id, "first question");
+    const first = useChat.getState().currentId[backend.id];
+
+    useChat.getState().newSession(backend.id);
+    expect(currentThread(backend.id)).toHaveLength(0);
+    await useChat.getState().send(backend.id, "second question");
+
+    const sessions = useChat
+      .getState()
+      .sessions.filter((session) => session.backendId === backend.id);
+    expect(sessions).toHaveLength(2);
+    // The opening message names the conversation, so the list is readable.
+    expect(sessions.find((session) => session.id === first)?.title).toBe(
+      "first question",
+    );
+    expect(values.get("rwkv-chat-v3")).toContain("first question");
+
+    // Switching back serves the old transcript, not the new one.
+    useChat.getState().selectSession(backend.id, first);
+    expect(currentThread(backend.id)[0].content).toBe("first question");
+  });
+
+  it("does not stack blank sessions and re-points the selection on delete", async () => {
+    capture();
+    useChat.getState().newSession(backend.id);
+    useChat.getState().newSession(backend.id);
+    expect(useChat.getState().sessions).toHaveLength(1);
+
+    await useChat.getState().send(backend.id, "kept");
+    const kept = useChat.getState().currentId[backend.id];
+    const extra = useChat.getState().newSession(backend.id);
+    useChat.getState().deleteSession(extra);
+    expect(useChat.getState().currentId[backend.id]).toBe(kept);
+  });
+
+  it("carries a v2 thread over as that node's first saved conversation", async () => {
+    const { useChat: fresh } = await import("../src/stores/chat");
+    const migrate = fresh.persist.getOptions().migrate;
+    const migrated = migrate?.(
+      { threads: { a1b2c3: [{ id: "m1", role: "user", content: "legacy" }] } },
+      2,
+    ) as { sessions: { backendId: string; title: string }[] };
+    expect(migrated.sessions).toHaveLength(1);
+    expect(migrated.sessions[0].backendId).toBe("a1b2c3");
+    expect(migrated.sessions[0].title).toBe("legacy");
   });
 });
 

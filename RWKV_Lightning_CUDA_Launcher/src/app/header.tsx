@@ -1,10 +1,9 @@
-import { RailToggle, RuntimeBadge } from "@/app/rail";
-import { useCurrent } from "@/app/use-current";
-import { modelName } from "@/components/node-status";
-import { RuntimeControls } from "@/components/runtime-controls";
-import { StatusDot } from "@/components/ui/badge";
+import { LogDockToggle } from "@/app/log-dock";
+import { RailToggle } from "@/app/rail";
+import { NodeProcessMenu } from "@/components/node-processes";
 import { useI18n, type MessageKey } from "@/lib/i18n";
 import { useRoute, type Route } from "@/lib/router";
+import { usePageTitle } from "@/stores/ui";
 
 const TITLES: Record<Route, MessageKey> = {
   nodes: "nodes.title",
@@ -19,8 +18,10 @@ const TITLES: Record<Route, MessageKey> = {
 export function Header() {
   const { t } = useI18n();
   const route = useRoute();
-  const { backend, runtime } = useCurrent();
-  const model = modelName(runtime);
+  // Pages carry their own <h1>; printing the same words here too was the
+  // "节点总览 / 节点总览" stutter. Show the view name in the bar only when the
+  // page has no heading of its own (Chat) or has scrolled past it.
+  const inlineTitle = usePageTitle((s) => s.inlineVisible);
 
   return (
     <header className="flex h-13 shrink-0 items-center gap-3 border-b border-border bg-card px-3.5">
@@ -42,20 +43,21 @@ export function Header() {
         </span>
       </div>
 
-      <span className="text-[13.5px] font-medium">{t(TITLES[route])}</span>
+      {!inlineTitle && (
+        <span className="animate-fade-in truncate text-[13.5px] font-medium">
+          {t(TITLES[route])}
+        </span>
+      )}
 
       <div className="flex-1" />
 
-      <RuntimeBadge />
+      {/* Status and commands are the same object: one chip that reports the
+          node's inference state and opens the three process rows. The bare
+          Start / Stop / Restart used to sit here on every page, which put an
+          unlabelled pair directly above each page's own labelled pair. */}
+      <NodeProcessMenu />
 
-      <span className="hidden max-w-[200px] items-center gap-1.5 truncate font-mono text-[11.5px] text-muted-foreground lg:inline-flex">
-        {model && <StatusDot tone="ok" />}
-        {model || t("status.noModel")}
-      </span>
-
-      {backend?.kind !== "inference_only" && (
-        <RuntimeControls className="pl-1" size="xs" />
-      )}
+      <LogDockToggle />
     </header>
   );
 }

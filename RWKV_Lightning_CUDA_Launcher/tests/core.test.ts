@@ -494,6 +494,278 @@ describe("loaded model reporting", () => {
   });
 });
 
+describe("node process rows", () => {
+  const rows = async (input: Record<string, unknown>) => {
+    const { nodeProcessRows } = await import(
+      "../src/components/node-processes"
+    );
+    const { translate } = await import("../src/lib/i18n");
+    type Translate = typeof translate;
+    const t = (
+      key: Parameters<Translate>[1],
+      vars?: Parameters<Translate>[2],
+    ) => translate("zh", key, vars);
+    return nodeProcessRows(t, {
+      backend: { reachable: true } as never,
+      hasAgent: true,
+      busy: false,
+      canStartRuntime: true,
+      ...input,
+    });
+  };
+
+  it("offers Start only for the process whose configuration is one click away", async () => {
+    const list = await rows({
+      runtime: { status: "offline" },
+      jobs: {
+        tuning: { running: true, progress: { step: 11, total: 630 } },
+        quantization: { running: false, status: "offline" },
+      },
+    });
+    expect(list.map((row) => row.key)).toEqual([
+      "runtime",
+      "tuning",
+      "quantization",
+    ]);
+    expect(list[0].startDisabled).toBe(false);
+    // Starting a multi-hour job from a menu, with a config the reader cannot
+    // see, is not a command worth one stray click.
+    expect(list[1].startable).toBe(false);
+    expect(list[2].startable).toBe(false);
+    // Stopping one, however, must never require finding the right page.
+    expect(list[1].stopDisabled).toBe(false);
+    expect(list[2].stopDisabled).toBe(true);
+    expect(list[1].state).toBe("11 / 630");
+  });
+
+  it("reports a ready runtime and refuses a second Start", async () => {
+    const list = await rows({
+      runtime: {
+        status: "ready",
+        running: true,
+        managed: true,
+        backend: { model: { name: "rwkv7-g1g-1.5b" } },
+      },
+      jobs: undefined,
+    });
+    expect(list[0].tone).toBe("ok");
+    expect(list[0].state).toBe("已就绪");
+    expect(list[0].detail).toBe("rwkv7-g1g-1.5b");
+    expect(list[0].startDisabled).toBe(true);
+    expect(list[0].stopDisabled).toBe(false);
+    expect(list[0].restartDisabled).toBe(false);
+  });
+
+  it("disables every command on a node that cannot be reached", async () => {
+    const list = await rows({
+      backend: { reachable: false } as never,
+      runtime: { status: "offline" },
+      jobs: { tuning: { running: true }, quantization: { running: true } },
+    });
+    for (const row of list) {
+      expect(row.tone).toBe("bad");
+      expect(row.startDisabled).toBe(true);
+      expect(row.stopDisabled).toBe(true);
+    }
+  });
+});
+
+describe("chart axes and downsampling", () => {
+  it("puts ticks on round numbers inside the range", async () => {
+    const { ticksFor } = await import("../src/components/metric-chart");
+    const ticks = ticksFor(0.94, 2.31);
+    expect(ticks.length).toBeGreaterThan(1);
+    expect(ticks.length).toBeLessThanOrEqual(6);
+    expect(ticks[0]).toBeGreaterThanOrEqual(0.94);
+    expect(ticks[ticks.length - 1]).toBeLessThanOrEqual(2.31);
+    // Round steps, not raw range/4 fractions: 0.3425 would label as 1.2825.
+    for (const tick of ticks) expect(Number(tick.toFixed(6)) % 0.25).toBe(0);
+    // A learning-rate window spans four orders of magnitude and must not
+    // collapse to a single tick.
+    expect(ticksFor(1e-5, 5e-4).length).toBeGreaterThan(1);
+    // Degenerate ranges (a metric that never moves) stay renderable.
+    expect(ticksFor(2, 2)).toEqual([2]);
+  });
+
+  it("caps the drawn points but keeps both ends of the run", async () => {
+    const { strided } = await import("../src/components/metric-chart");
+    const run = Array.from({ length: 4000 }, (_, index) => ({
+      step: index,
+      value: index,
+    }));
+    const drawn = strided(run, 900);
+    expect(drawn.length).toBeLessThanOrEqual(901);
+    expect(drawn[0].step).toBe(0);
+    // The newest step is what a live run is watched for; it survives striding.
+    expect(drawn[drawn.length - 1].step).toBe(3999);
+    // Short runs are passed through untouched.
+    expect(strided(run.slice(0, 10), 900)).toHaveLength(10);
+  });
+
+  it("renders the empty hint instead of an axis when a run has no points", async () => {
+    const { createElement } = await import("react");
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const { MetricChart } = await import("../src/components/metric-chart");
+    const html = renderToStaticMarkup(
+      createElement(MetricChart, {
+        points: [],
+        label: "loss",
+        format: (value: number) => value.toFixed(3),
+        emptyLabel: "还没有曲线",
+      }),
+    );
+    expect(html).toContain("还没有曲线");
+    expect(html).not.toContain("<svg");
+  });
+});
+
+describe("log console", () => {
+  const render = async (stream: {
+    lines: string[];
+    status: "idle" | "connecting" | "open" | "error";
+    error: string;
+  }) => {
+    const { createElement } = await import("react");
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const { LogConsole } = await import("../src/components/log-console");
+    return renderToStaticMarkup(
+      createElement(LogConsole, {
+        stream,
+        endpoint: "/api/v1/runtime/logs",
+      }),
+    );
+  };
+
+  it("marks failure lines apart from ordinary output", async () => {
+    const html = await render({
+      lines: ["loading model", "CUDA out of memory", "Traceback (most recent)"],
+      status: "open",
+      error: "",
+    });
+    expect(html).toContain("loading model");
+    // Three lines, two of which must stand out as failures.
+    expect(html.split("text-destructive").length - 1).toBe(2);
+    expect(html).toContain("/api/v1/runtime/logs");
+  });
+
+  it("names the connection state and surfaces the transport error", async () => {
+    const { translate } = await import("../src/lib/i18n");
+    const open = await render({ lines: ["ready"], status: "open", error: "" });
+    expect(open).toContain(translate("zh", "logs.statusOpen"));
+    expect(open).toContain(translate("zh", "logs.lineCount", { count: 1 }));
+
+    // A dead stream must say so rather than looking like a quiet one.
+    const broken = await render({
+      lines: [],
+      status: "error",
+      error: "dial tcp 127.0.0.1:8000: connection refused",
+    });
+    expect(broken).toContain(translate("zh", "logs.statusError"));
+    expect(broken).toContain("connection refused");
+    expect(broken).toContain(translate("zh", "runtime.logsEmpty"));
+  });
+});
+
+describe("chat session list", () => {
+  const session = (title: string, id = title) => ({
+    id,
+    backendId: "local",
+    title,
+    messages: [],
+    createdAt: 0,
+    updatedAt: 0,
+  });
+
+  it("searches over the placeholder an unnamed conversation shows", async () => {
+    const { filterSessions, titleOf } = await import(
+      "../src/components/chat/session-picker"
+    );
+    const sessions = [session("训练脚本怎么写"), session("", "blank")];
+    expect(titleOf(sessions[1], "未命名会话")).toBe("未命名会话");
+    expect(filterSessions(sessions, "  ", "未命名会话")).toHaveLength(2);
+    expect(filterSessions(sessions, "训练", "未命名会话")).toHaveLength(1);
+    expect(filterSessions(sessions, "未命名", "未命名会话")[0].id).toBe(
+      "blank",
+    );
+    expect(filterSessions(sessions, "nothing", "未命名会话")).toHaveLength(0);
+  });
+
+  it("offers the history button even before a node has any conversation", async () => {
+    const { createElement } = await import("react");
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const { SessionPicker } = await import(
+      "../src/components/chat/session-picker"
+    );
+    const { translate } = await import("../src/lib/i18n");
+    const html = renderToStaticMarkup(
+      createElement(SessionPicker, { backendId: "local" }),
+    );
+    expect(html).toContain(translate("zh", "chat.conversations"));
+    // Live button, not a dead one: history is reachable from the first visit.
+    // (`disabled:` also appears inside the class list, hence the attribute.)
+    expect(html).not.toContain('disabled=""');
+  });
+});
+
+describe("training curve smoothing", () => {
+  it("debiases the EMA so a run does not appear to start where it did not", async () => {
+    const { smoothSeries } = await import("../src/components/metric-chart");
+    const flat = Array.from({ length: 20 }, (_, index) => ({
+      step: index,
+      value: 4,
+    }));
+    const smoothed = smoothSeries(flat, 0.9);
+    // A plain EMA would start near 0.4 on this series and climb for dozens of
+    // points; the debiased one sits on the data from the first step.
+    expect(smoothed[0].value).toBeCloseTo(4, 6);
+    expect(smoothed[smoothed.length - 1].value).toBeCloseTo(4, 6);
+  });
+
+  it("follows the trend without reproducing every spike", async () => {
+    const { smoothSeries } = await import("../src/components/metric-chart");
+    const noisy = Array.from({ length: 50 }, (_, index) => ({
+      step: index,
+      value: index % 2 === 0 ? 1 : 3,
+    }));
+    const smoothed = smoothSeries(noisy, 0.8);
+    const last = smoothed[smoothed.length - 1].value;
+    expect(last).toBeGreaterThan(1.6);
+    expect(last).toBeLessThan(2.4);
+    // Smoothing 0 is the identity, so the raw curve stays available.
+    expect(smoothSeries(noisy, 0)).toBe(noisy);
+  });
+});
+
+describe("runtime status wording", () => {
+  it("names the subject so a stopped runtime does not read as a dead node", async () => {
+    const { runtimeLabel, runtimeStateLabel, runtimeHint } = await import(
+      "../src/components/node-status"
+    );
+    const { translate } = await import("../src/lib/i18n");
+    type Translate = typeof translate;
+    const t = (
+      key: Parameters<Translate>[1],
+      vars?: Parameters<Translate>[2],
+    ) => translate("zh", key, vars);
+
+    // A reachable node with nothing serving: the chip has to say *what* is
+    // not started, and the tooltip has to say the node itself is fine.
+    expect(runtimeLabel(t, { status: "offline" } as never)).toBe(
+      "推理服务未启动",
+    );
+    expect(runtimeLabel(t, undefined)).toBe("推理服务未启动");
+    expect(runtimeHint(t, { status: "offline" } as never)).toBeTruthy();
+    expect(runtimeHint(t, { status: "ready" } as never)).toBeUndefined();
+
+    // Rows that already carry a "推理服务" label take the bare state word.
+    expect(runtimeStateLabel(t, { status: "offline" } as never)).toBe("未启动");
+    expect(runtimeStateLabel(t, { status: "ready" } as never)).toBe("已就绪");
+    expect(
+      runtimeStateLabel(t, { status: "ready", managed: false } as never),
+    ).toBe("已就绪 · 外部进程");
+  });
+});
+
 describe("runtime control gating", () => {
   const base = {
     reachableAgent: true,

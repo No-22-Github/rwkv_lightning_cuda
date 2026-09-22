@@ -4,7 +4,7 @@ import {
   CapabilityBadges,
   modelName,
   nodeTone,
-  runtimeLabel,
+  runtimeStateLabel,
 } from "@/components/node-status";
 import { PageHeader } from "@/components/common";
 import { Badge, StatusDot } from "@/components/ui/badge";
@@ -163,7 +163,7 @@ export function NodesPage() {
                       </div>
                       <div className="mt-0.5 truncate font-mono text-[12.5px]">
                         {backend.reachable
-                          ? runtimeLabel(t, runtime)
+                          ? runtimeStateLabel(t, runtime)
                           : t("status.unreachable")}
                       </div>
                     </div>

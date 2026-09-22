@@ -8,11 +8,13 @@ const badgeVariants = cva(
     variants: {
       variant: {
         default: "border-border bg-muted px-2 py-0.5 text-muted-foreground",
-        outline: "border-border bg-transparent px-2 py-0.5 text-muted-foreground",
+        outline:
+          "border-border bg-transparent px-2 py-0.5 text-muted-foreground",
         mono: "border-border bg-muted px-1.5 py-0.5 font-mono text-[10.5px] text-muted-foreground",
         success: "border-transparent bg-success/15 px-2 py-0.5 text-success",
         warning: "border-transparent bg-warning/15 px-2 py-0.5 text-warning",
-        danger: "border-transparent bg-destructive/15 px-2 py-0.5 text-destructive",
+        danger:
+          "border-transparent bg-destructive/15 px-2 py-0.5 text-destructive",
         info: "border-transparent bg-info/15 px-2 py-0.5 text-info",
       },
     },
@@ -62,27 +64,42 @@ export function StatusDot({
   );
 }
 
-/** Dot + label pair used in headers and node cards. */
+/**
+ * Dot + label pair used in headers, node cards and the runtime strip. `size`
+ * picks between the quiet inline form and the strip's larger, foreground one;
+ * `mono` is for values (paths, device lists) rather than words.
+ */
 export function StatusPill({
   tone,
   label,
   pulse,
+  mono,
+  size = "sm",
   className,
+  labelClassName,
 }: {
   tone: StatusTone;
   label: string;
   pulse?: boolean;
+  mono?: boolean;
+  size?: "sm" | "md";
   className?: string;
+  labelClassName?: string;
 }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 text-[11.5px] text-muted-foreground",
+        "inline-flex items-center",
+        size === "md"
+          ? "gap-2 text-[12.5px] font-medium"
+          : "gap-1.5 text-[11.5px] text-muted-foreground",
         className,
       )}
     >
       <StatusDot tone={tone} pulse={pulse} />
-      {label}
+      <span className={cn(mono && "truncate font-mono", labelClassName)}>
+        {label}
+      </span>
     </span>
   );
 }

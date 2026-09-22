@@ -10,6 +10,7 @@ import {
   gpuUnavailableReason,
   GpuMiniRows,
   nodeTone,
+  runtimeHint,
   runtimeLabel,
 } from "@/components/node-status";
 import { useI18n } from "@/lib/i18n";
@@ -59,11 +60,19 @@ export function BackendSwitcher() {
         : runtimeLabel(t, runtime)
     : "";
 
+  // Same trap as the header badge: the pill below the node name describes the
+  // inference server, not the box, so the tooltip says which one is down.
+  const hint =
+    current && !current.reachable
+      ? current.probe_error || t("status.unreachable")
+      : runtimeHint(t, runtime);
+
   return (
     <Popover>
       <PopoverTrigger asChild>
         <button
           type="button"
+          title={hint}
           className="block w-full overflow-hidden rounded-t-xl border border-b-0 border-border bg-background text-left transition-colors hover:bg-muted"
         >
           <span className="flex items-center gap-2 px-3 pt-2.5">

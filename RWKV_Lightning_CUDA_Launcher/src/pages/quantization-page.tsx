@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
-import { Cpu, Play, Square, TriangleAlert } from "lucide-react";
+import { useCallback, useState } from "react";
+import { Cpu, Play, ScrollText, Square, TriangleAlert } from "lucide-react";
 import { useCurrent } from "@/app/use-current";
 import { CopyButton, PageHeader, PathField } from "@/components/common";
-import { LogViewer } from "@/components/log-viewer";
 import { StatusDot } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,13 +13,11 @@ import { suggestedQuantizedPath } from "@/lib/api/launcher";
 import type { QuantizationConfig, QuantizationFormat } from "@/lib/api/types";
 import { formatDuration } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
+import { useAction } from "@/lib/use-action";
 import { hasCapability } from "@/stores/backends";
 import { useQuantizationForm, useQuantizationFormEntry } from "@/stores/forms";
-import { useLogs, useLogStream } from "@/stores/logs";
 import { useNodeBusy, useNodes } from "@/stores/nodes";
-import { toast } from "@/stores/ui";
-
-const LOG_ENDPOINT = "/api/v1/jobs/quantization/logs";
+import { useLogDock } from "@/stores/ui";
 
 export function QuantizationPage() {
   const { t } = useI18n();
@@ -34,17 +31,11 @@ export function QuantizationPage() {
   );
   /** True while `output_path` is still the value we derived from the input. */
   const [autoOutput, setAutoOutput] = useState(false);
-  const { lines } = useLogStream(backendId, "quantization");
+  const run = useAction();
 
   const quant = jobs?.quantization;
   const progress = quant?.progress ?? null;
   const outputPath = quant?.output_path ?? "";
-
-  useEffect(() => {
-    if (!backendId) return;
-    useLogs.getState().open(backendId, "quantization");
-    return () => useLogs.getState().close(backendId, "quantization");
-  }, [backendId]);
 
   const supportsQuant = hasCapability(backend, "quantization");
 
@@ -77,30 +68,14 @@ export function QuantizationPage() {
     set(derive({ format }, format, config.input_path));
   };
 
-  const start = async () => {
+  const start = () => {
     if (!backendId) return;
-    try {
-      await useNodes.getState().startQuantization(backendId, config);
-    } catch (error) {
-      toast.error(
-        t("toast.failed", {
-          error: error instanceof Error ? error.message : String(error),
-        }),
-      );
-    }
+    void run(() => useNodes.getState().startQuantization(backendId, config));
   };
 
-  const stop = async () => {
+  const stop = () => {
     if (!backendId) return;
-    try {
-      await useNodes.getState().stopJob(backendId, "quantization");
-    } catch (error) {
-      toast.error(
-        t("toast.failed", {
-          error: error instanceof Error ? error.message : String(error),
-        }),
-      );
-    }
+    void run(() => useNodes.getState().stopJob(backendId, "quantization"));
   };
 
   return (
@@ -177,7 +152,11 @@ export function QuantizationPage() {
               <Square className="size-3.5" />
               {t("common.stop")}
             </Button>
-            <span className="text-[11.5px] text-muted-foreground">
+            <Button onClick={() => useLogDock.getState().show("quantization")}>
+              <ScrollText className="size-3.5" />
+              {t("logs.open")}
+            </Button>
+            <span className="min-w-0 flex-1 text-[11.5px] text-muted-foreground">
               {t("quant.hint")}
             </span>
           </div>
@@ -226,13 +205,6 @@ export function QuantizationPage() {
           </CardContent>
         </Card>
       )}
-
-      <LogViewer
-        className="mt-3.5"
-        lines={lines}
-        title={t("quant.title")}
-        endpoint={LOG_ENDPOINT}
-      />
     </div>
   );
 }

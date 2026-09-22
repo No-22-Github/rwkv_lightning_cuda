@@ -35,6 +35,7 @@ const zh = {
   "common.reset": "恢复默认",
   "common.search": "搜索",
   "common.filter": "过滤输出…",
+  "common.follow": "跟随最新输出",
   "common.empty": "暂无数据",
   "common.default": "缺省",
   "common.auto": "自动",
@@ -52,13 +53,17 @@ const zh = {
   "nav.chat": "Chat",
   "nav.translate": "并行翻译",
   "nav.operations": "节点运维",
-  "nav.runtime": "Runtime",
+  "nav.runtime": "推理服务",
   "nav.training": "State / MiSS 训练",
   "nav.quantization": "量化",
   "nav.settings": "设置",
 
   "header.toggleSidebar": "折叠 / 展开侧栏",
   "header.expandSidebar": "展开侧栏",
+  // 折叠侧栏只有 ~20px 可画，逐卡画条在多卡机器上必然溢出；这里给一个
+  // 聚合读数，明细留给悬浮卡片。
+  "rail.gpuSummary": "{count} 张 GPU · 平均利用率 {avg}%",
+  "rail.gpuSummaryOne": "GPU 利用率 {avg}%",
 
   "backend.local": "本机",
   "backend.registered": "已注册后端",
@@ -99,10 +104,15 @@ const zh = {
 
   "status.reachable": "节点可达",
   "status.unreachable": "节点不可达",
-  "status.runtimeReady": "runtime ready",
-  "status.runtimeExternal": "runtime ready · 外部",
-  "status.runtimeOffline": "runtime offline",
-  "status.runtimeUnknown": "runtime unknown",
+  // The runtime is one process on the node, not the node itself. A bare
+  // "runtime offline" next to a box that answers every probe reads as a dead
+  // machine, so every standalone status names its subject.
+  "status.runtimeState": "推理服务{state}",
+  "status.ready": "已就绪",
+  "status.readyExternal": "已就绪 · 外部进程",
+  "status.notStarted": "未启动",
+  "status.notStartedHint":
+    "节点在线，只是推理服务还没启动；点「启动」即可加载模型。",
   "status.inferenceOnly": "inference only",
   "status.notApplicable": "n/a",
   "status.running": "运行中",
@@ -117,12 +127,12 @@ const zh = {
 
   "nodes.title": "节点总览",
   "nodes.subtitle":
-    "所有已注册后端的可达性、runtime 状态与运行中的任务。切换节点后所有页面跟随该节点。",
+    "所有已注册后端的可达性、推理服务状态与运行中的任务。切换节点后所有页面跟随该节点。",
   "nodes.registered": "已注册节点",
   "nodes.reachable": "最近探测可达",
-  "nodes.runtimeReady": "Runtime ready",
+  "nodes.runtimeReady": "推理服务就绪",
   "nodes.runningJobs": "运行中任务",
-  "nodes.runtime": "runtime",
+  "nodes.runtime": "推理服务",
   "nodes.model": "已加载模型",
   "nodes.devices": "选卡",
   "nodes.port": "端口",
@@ -130,12 +140,12 @@ const zh = {
   "nodes.probeFailed": "探测失败",
   "nodes.emptyTitle": "还没有可管理的节点",
   "nodes.emptyBody":
-    "添加一个远端 Agent 的根地址即可开始；纯 Client 形态下没有 local runtime 是正常状态。",
+    "添加一个远端 Agent 的根地址即可开始；纯 Client 形态下没有本地推理服务是正常状态。",
   "nodes.addBackend": "添加后端",
   "nodes.unreachableHint":
-    "可达性只代表最近一次探测连通，不等于 runtime ready，也不等于模型已加载。",
+    "可达性只代表最近一次探测连通，不等于推理服务已就绪，也不等于模型已加载。",
 
-  "runtime.title": "Runtime",
+  "runtime.title": "推理服务",
   "runtime.subtitle":
     "在该节点上启动、停止与重启原生推理进程。路径属于节点所在机器。",
   "runtime.polling": "状态每 1.6s 轮询 /api/v1/runtime",
@@ -159,7 +169,7 @@ const zh = {
   "runtime.deviceRetuneHint":
     "W8A16 调优缓存按卡区分，换卡后首次启动会先重新调优（通常几分钟），之后不再重复。",
   "runtime.port": "端口",
-  "runtime.password": "runtime 密码",
+  "runtime.password": "推理服务密码",
   "runtime.passwordHint": "与 Agent token 不同；状态接口永远回显为空",
   "runtime.performance": "性能与缓存",
   "runtime.chunkSize": "Prefill 分块大小",
@@ -176,8 +186,31 @@ const zh = {
   "runtime.gpuReason.inference": "裸推理节点：没有 Agent 指标能力。",
   "runtime.gpuReason.unreachable": "节点不可达，指标暂无。",
   "runtime.gpuReason.unknown": "指标不可用。",
-  "runtime.logs": "运行日志",
-  "runtime.logsEmpty": "暂无日志输出。启动 runtime 后这里会实时刷新。",
+  "runtime.logs": "推理服务日志",
+  "runtime.logsEmpty": "暂无日志输出。启动推理服务后这里会实时刷新。",
+
+  "logs.title": "日志",
+  "logs.open": "查看日志",
+  "logs.toggle": "日志面板（⌘⇧L / Ctrl+⇧+L）",
+  "logs.hide": "收起日志面板",
+  "logs.streamRuntime": "推理服务",
+  "logs.streamTuning": "训练",
+  "logs.streamQuantization": "量化",
+  "logs.clear": "清空",
+  "logs.resize": "拖动调整高度",
+  "logs.statusOpen": "已连接",
+  "logs.statusConnecting": "连接中…",
+  "logs.statusIdle": "未连接",
+  "logs.statusError": "连接失败",
+  "logs.noAgent": "该节点没有 Agent，读不到日志流。",
+  "logs.lineCount": "{count} 行",
+
+  "process.title": "节点进程",
+  "process.menu": "节点进程与控制",
+  "process.idle": "未运行",
+  "process.openRuntime": "打开推理服务设置…",
+  "process.jobPage": "任务要在自己的页面里配置后再开始",
+  "process.noAgent": "该节点没有 Agent，进程由对方自己管理。",
   "runtime.copyLogs": "复制",
   "runtime.unsupported":
     "该节点是裸推理节点，不能起停进程、训练、量化或浏览目录。",
@@ -201,18 +234,22 @@ const zh = {
   "chat.topP": "top_p",
   "chat.topK": "top_k",
   "chat.maxTokens": "max_tokens",
+  "chat.temperatureHint": "越高越随机；0 近似贪心解码。",
+  "chat.topPHint": "只在累计概率前 p 的候选里采样。",
+  "chat.topKHint": "候选数上限；0 表示不限制。",
+  "chat.maxTokensHint": "单次回复最多生成的 token 数。",
+  "chat.penalties": "重复惩罚",
+  "chat.penaltiesHint": "复读时先调 alpha_frequency，再调 alpha_presence。",
+  "chat.alphaPresence": "alpha_presence",
+  "chat.alphaFrequency": "alpha_frequency",
+  "chat.alphaDecay": "alpha_decay",
+  "chat.alphaPresenceHint": "出现过就扣分，压制整体复读。",
+  "chat.alphaFrequencyHint": "按出现次数累加扣分。",
+  "chat.alphaDecayHint": "惩罚随距离衰减；越接近 1 记得越久。",
+  "chat.resetGeneration": "恢复默认参数",
   "chat.emptyTitle": "开始一段新对话",
   "chat.emptyBody":
     "消息会发送到当前节点的 /v1/chat/completions，由服务端套用聊天模板。",
-  "chat.modelLoader": "模型与显卡",
-  "chat.loadCard": "加载到哪张卡",
-  "chat.autoCard": "自动 · 空闲显存最大",
-  "chat.gpuFree": "空闲 {free}G",
-  "chat.loadOnCard": "加载（换卡会重启 runtime）",
-  "chat.loadDone": "已在 GPU {card} 上就绪",
-  "chat.loadHint":
-    "加载会先停止当前 runtime，再以环境变量钉定所选显卡重启，活跃推理会中断。",
-  "chat.loadCurrent": "当前所在卡：",
   "chat.you": "你",
   "chat.assistant": "助手",
   "chat.stopped": "已停止生成。",
@@ -231,6 +268,11 @@ const zh = {
   "chat.thinking": "思考中",
   "chat.untitled": "未命名会话",
   "chat.deleteConversation": "删除会话",
+  "chat.renameConversation": "重命名",
+  "chat.conversationCount": "{count} 条消息",
+  "chat.noConversations": "该节点还没有保存过会话。",
+  "chat.historyHint": "会话保存在本机浏览器里，不会上传到节点。",
+  "chat.searchConversations": "搜索会话…",
   "chat.preview": "预览 HTML",
   "chat.characters": "{count} 字符",
 
@@ -244,6 +286,18 @@ const zh = {
   "state.tensors": "张量",
   "state.created": "创建时间",
   "state.deleteConfirm": "删除 state「{name}」？",
+  "state.sourceLocal": "从这台电脑上传",
+  "state.sourceNode": "从节点上的路径导入",
+  "state.nodePath": "节点上的 .pth 路径",
+  "state.import": "导入",
+  "state.imported": "已导入 {name}",
+  "state.importUnsupported":
+    "该节点的 Agent 版本还不支持从节点路径导入，只能从本机上传。",
+  "state.importHint":
+    "文件由该节点的 Agent 读取后交给推理服务，不经过你的电脑。",
+
+  "file.choose": "选择文件",
+  "file.dropHint": "也可以把文件拖到这里",
 
   "adapter.title": "MiSS adapter 管理",
   "adapter.description":
@@ -286,7 +340,7 @@ const zh = {
   "translate.pending": "等待",
   "translate.unsupported": "该节点不支持 /v1/batch/completions。",
   "translate.noRuntime":
-    "当前节点还没有 ready 的 runtime，请先在 Runtime 页启动。",
+    "当前节点的推理服务还没有就绪，请先在「推理服务」页启动。",
   "translate.rendered": "{done} / {total} · {chars} 字符",
 
   "training.title": "State / MiSS 训练",
@@ -341,6 +395,41 @@ const zh = {
   "training.running": "训练进行中",
   "training.datasetHint": "非空行恰好一个字符串 text 字段",
 
+  "training.stop": "停止训练",
+  "training.method.label": "训练方法",
+  "training.jobControls": "训练任务",
+  "training.cannotStart": "还不能开始：{reason}",
+  "training.needModel": "选择 BF16 基模",
+  "training.needData": "选择数据集 JSONL",
+  "training.needOutput": "填写输出目录",
+  "training.needNumbers": "参数超出允许范围",
+  "training.needNode": "先选择一个节点",
+  "training.needCapability": "该节点没有训练能力",
+  "training.busy": "节点上有别的操作在进行",
+
+  "training.groupSequence": "序列与批次",
+  "training.groupOptimizer": "优化",
+  "training.groupRun": "保存与复现",
+  "training.hint.ctx": "训练上下文长度（token），必须 ≥ chunk。",
+  "training.hint.chunk": "反传分块长度；越小越省显存，也越慢。",
+  "training.hint.batch_size": "每步样本数，1–128；显存不够先降它。",
+  "training.hint.epochs": "数据集完整遍历几遍。",
+  "training.hint.max_steps": "总步数上限；0 表示按 epochs 跑完。",
+  "training.hint.lr": "初始学习率，state 训练常用 5e-4 量级。",
+  "training.hint.lr_final": "衰减终点，应当 ≤ lr。",
+  "training.hint.warmup_steps": "前多少步把学习率从 0 线性升到 lr。",
+  "training.hint.save_every": "每多少步存一次 checkpoint；0 表示只在结束时存。",
+  "training.hint.seed": "随机种子，用于复现同一次训练。",
+  "training.lrFinalWarning": "lr_final 大于 lr，学习率会反向上升。",
+
+  "training.metric": "曲线",
+  "training.metricLoss": "loss",
+  "training.metricLr": "lr",
+  "training.metricTps": "tok/s",
+  "training.smoothing": "平滑",
+  "training.chartEmpty": "开始训练后这里会出现曲线",
+  "training.chartHint": "浅色为原始值，深色为 EMA 平滑后的曲线。",
+
   "quant.title": "量化",
   "quant.subtitle":
     "把 BF16 checkpoint 转成更小的 .rwkvq；输出文件必须尚不存在，不能覆盖输入。",
@@ -378,11 +467,11 @@ const zh = {
   "settings.batchSize": "batch size",
   "settings.currentNode": "当前节点",
   "settings.nodeHint":
-    "切换节点会影响 Runtime、训练、量化与推理页面；设置项本身是全局的。",
+    "切换节点会影响推理服务、训练、量化与推理页面；设置项本身是全局的。",
   "settings.saved": "设置已保存",
   "settings.storageWarning":
     "以下操作只影响本浏览器存储，不影响节点上的模型、state 或任务。",
-  "settings.passwordHint": "runtime 密码仅保存在本次会话内存中，不会落盘。",
+  "settings.passwordHint": "推理服务密码仅保存在本次会话内存中，不会落盘。",
   "settings.agentToken": "Agent token",
   "settings.resetTitle": "本机数据",
 
@@ -454,6 +543,7 @@ const en: Record<MessageKey, string> = {
   "common.reset": "Reset",
   "common.search": "Search",
   "common.filter": "Filter output…",
+  "common.follow": "Follow the tail",
   "common.empty": "No data",
   "common.default": "Default",
   "common.auto": "Auto",
@@ -471,13 +561,15 @@ const en: Record<MessageKey, string> = {
   "nav.chat": "Chat",
   "nav.translate": "Parallel Translate",
   "nav.operations": "OPERATIONS",
-  "nav.runtime": "Runtime",
+  "nav.runtime": "Inference service",
   "nav.training": "State / MiSS Training",
   "nav.quantization": "Quantization",
   "nav.settings": "Settings",
 
   "header.toggleSidebar": "Toggle sidebar",
   "header.expandSidebar": "Expand sidebar",
+  "rail.gpuSummary": "{count} GPUs · {avg}% average utilization",
+  "rail.gpuSummaryOne": "GPU utilization {avg}%",
 
   "backend.local": "This machine",
   "backend.registered": "REGISTERED BACKENDS",
@@ -519,10 +611,12 @@ const en: Record<MessageKey, string> = {
 
   "status.reachable": "Node reachable",
   "status.unreachable": "Node unreachable",
-  "status.runtimeReady": "runtime ready",
-  "status.runtimeExternal": "runtime ready · external",
-  "status.runtimeOffline": "runtime offline",
-  "status.runtimeUnknown": "runtime unknown",
+  "status.runtimeState": "Inference {state}",
+  "status.ready": "ready",
+  "status.readyExternal": "ready · external process",
+  "status.notStarted": "not started",
+  "status.notStartedHint":
+    "The node is online; only the inference server is not running yet. Press Start to load a model.",
   "status.inferenceOnly": "inference only",
   "status.notApplicable": "n/a",
   "status.running": "running",
@@ -537,12 +631,12 @@ const en: Record<MessageKey, string> = {
 
   "nodes.title": "Nodes",
   "nodes.subtitle":
-    "Reachability, runtime state and running jobs across every registered backend. Switching a node re-scopes every page.",
+    "Reachability, inference state and running jobs across every registered backend. Switching a node re-scopes every page.",
   "nodes.registered": "Registered",
   "nodes.reachable": "Reachable",
-  "nodes.runtimeReady": "Runtime ready",
+  "nodes.runtimeReady": "Inference ready",
   "nodes.runningJobs": "Running jobs",
-  "nodes.runtime": "runtime",
+  "nodes.runtime": "Inference",
   "nodes.model": "model",
   "nodes.devices": "devices",
   "nodes.port": "port",
@@ -550,12 +644,12 @@ const en: Record<MessageKey, string> = {
   "nodes.probeFailed": "Probe failed",
   "nodes.emptyTitle": "No manageable node yet",
   "nodes.emptyBody":
-    "Register a remote Agent root address to get started. A pure Client without a local runtime is a valid state, not an error.",
+    "Register a remote Agent root address to get started. A pure Client without a local inference service is a valid state, not an error.",
   "nodes.addBackend": "Add backend",
   "nodes.unreachableHint":
-    "Reachability only means the last probe connected — it is not runtime readiness, and neither means the model is loaded.",
+    "Reachability only means the last probe connected — it does not mean the inference service is ready, and neither means the model is loaded.",
 
-  "runtime.title": "Runtime",
+  "runtime.title": "Inference service",
   "runtime.subtitle":
     "Start, stop and restart the native inference process on this node. Paths belong to the node's machine.",
   "runtime.polling": "Polling /api/v1/runtime every 1.6s",
@@ -580,7 +674,7 @@ const en: Record<MessageKey, string> = {
   "runtime.deviceRetuneHint":
     "The W8A16 tuning cache is per-card, so the first start on a new card retunes before serving (usually a couple of minutes). It happens once.",
   "runtime.port": "Port",
-  "runtime.password": "Runtime password",
+  "runtime.password": "Inference password",
   "runtime.passwordHint":
     "Different from the Agent token; the status API always echoes empty",
   "runtime.performance": "Performance & cache",
@@ -599,9 +693,33 @@ const en: Record<MessageKey, string> = {
     "Inference-only node: no Agent metrics capability.",
   "runtime.gpuReason.unreachable": "Node unreachable — no metrics.",
   "runtime.gpuReason.unknown": "Metrics unavailable.",
-  "runtime.logs": "Runtime logs",
+  "runtime.logs": "Inference service logs",
   "runtime.logsEmpty":
-    "No log output yet. Start the runtime and this fills in live.",
+    "No log output yet. Start the inference service and this fills in live.",
+
+  "logs.title": "Logs",
+  "logs.open": "Open logs",
+  "logs.toggle": "Log console (⌘⇧L / Ctrl+⇧+L)",
+  "logs.hide": "Hide the log console",
+  "logs.streamRuntime": "Inference service",
+  "logs.streamTuning": "Training",
+  "logs.streamQuantization": "Quantization",
+  "logs.clear": "Clear",
+  "logs.resize": "Drag to resize",
+  "logs.statusOpen": "connected",
+  "logs.statusConnecting": "connecting…",
+  "logs.statusIdle": "not connected",
+  "logs.statusError": "connection failed",
+  "logs.noAgent": "This node has no Agent, so there is no log stream to read.",
+  "logs.lineCount": "{count} lines",
+
+  "process.title": "Node processes",
+  "process.menu": "Node processes and controls",
+  "process.idle": "not running",
+  "process.openRuntime": "Open inference settings…",
+  "process.jobPage": "Jobs start from their own page, where the config is",
+  "process.noAgent":
+    "This node has no Agent; its processes are managed elsewhere.",
   "runtime.copyLogs": "Copy",
   "runtime.unsupported":
     "This is an inference-only node: no process control, training, quantization or directory browsing.",
@@ -625,18 +743,23 @@ const en: Record<MessageKey, string> = {
   "chat.topP": "top_p",
   "chat.topK": "top_k",
   "chat.maxTokens": "max_tokens",
+  "chat.temperatureHint": "Higher is more random; 0 is near-greedy decoding.",
+  "chat.topPHint": "Sample only from the top-p probability mass.",
+  "chat.topKHint": "Candidate cap; 0 means no limit.",
+  "chat.maxTokensHint": "Upper bound on tokens generated per reply.",
+  "chat.penalties": "Repetition penalties",
+  "chat.penaltiesHint":
+    "For a looping model, raise alpha_frequency first, then alpha_presence.",
+  "chat.alphaPresence": "alpha_presence",
+  "chat.alphaFrequency": "alpha_frequency",
+  "chat.alphaDecay": "alpha_decay",
+  "chat.alphaPresenceHint": "Penalises any token already seen.",
+  "chat.alphaFrequencyHint": "Penalty grows with each repeat.",
+  "chat.alphaDecayHint": "How long the penalty is remembered; 1 is forever.",
+  "chat.resetGeneration": "Reset to defaults",
   "chat.emptyTitle": "Start a new conversation",
   "chat.emptyBody":
     "Messages go to the current node's /v1/chat/completions; the server applies the chat template.",
-  "chat.modelLoader": "Model & GPU",
-  "chat.loadCard": "Load onto card",
-  "chat.autoCard": "Auto · most free VRAM",
-  "chat.gpuFree": "{free}G free",
-  "chat.loadOnCard": "Load (switching cards restarts the runtime)",
-  "chat.loadDone": "Ready on GPU {card}",
-  "chat.loadHint":
-    "Loading stops the current runtime and restarts it with the chosen card injected as an environment variable; active inference is interrupted.",
-  "chat.loadCurrent": "Currently on:",
   "chat.you": "You",
   "chat.assistant": "Assistant",
   "chat.stopped": "Generation stopped.",
@@ -656,6 +779,12 @@ const en: Record<MessageKey, string> = {
   "chat.thinking": "Thinking",
   "chat.untitled": "Untitled conversation",
   "chat.deleteConversation": "Delete conversation",
+  "chat.renameConversation": "Rename",
+  "chat.conversationCount": "{count} messages",
+  "chat.noConversations": "No saved conversation for this node yet.",
+  "chat.historyHint":
+    "Conversations are stored in this browser and never uploaded to the node.",
+  "chat.searchConversations": "Search conversations…",
   "chat.preview": "Preview HTML",
   "chat.characters": "{count} characters",
 
@@ -669,6 +798,18 @@ const en: Record<MessageKey, string> = {
   "state.tensors": "Tensors",
   "state.created": "Created",
   "state.deleteConfirm": "Delete state “{name}”?",
+  "state.sourceLocal": "Upload from this computer",
+  "state.sourceNode": "Import from a path on the node",
+  "state.nodePath": ".pth path on the node",
+  "state.import": "Import",
+  "state.imported": "Imported {name}",
+  "state.importUnsupported":
+    "This node's Agent is too old to import from a node path; upload from this computer instead.",
+  "state.importHint":
+    "The node's Agent reads the file and hands it to the inference service; it never travels through your computer.",
+
+  "file.choose": "Choose file",
+  "file.dropHint": "or drop a file here",
 
   "adapter.title": "MiSS adapter manager",
   "adapter.description":
@@ -712,7 +853,7 @@ const en: Record<MessageKey, string> = {
   "translate.pending": "pending",
   "translate.unsupported": "This node does not support /v1/batch/completions.",
   "translate.noRuntime":
-    "This node has no ready runtime yet. Start it on the Runtime page first.",
+    "This node has no ready inference service yet. Start it on the Inference service page first.",
   "translate.rendered": "{done} / {total} · {chars} chars",
 
   "training.title": "State / MiSS Training",
@@ -768,6 +909,46 @@ const en: Record<MessageKey, string> = {
   "training.running": "Training in progress",
   "training.datasetHint": "Each non-empty line holds exactly one `text` string",
 
+  "training.stop": "Stop training",
+  "training.method.label": "Method",
+  "training.jobControls": "Training job",
+  "training.cannotStart": "Not ready: {reason}",
+  "training.needModel": "choose a BF16 base model",
+  "training.needData": "choose a dataset JSONL",
+  "training.needOutput": "set an output directory",
+  "training.needNumbers": "a parameter is out of range",
+  "training.needNode": "select a node first",
+  "training.needCapability": "this node has no training support",
+  "training.busy": "another operation is running on this node",
+
+  "training.groupSequence": "Sequence and batching",
+  "training.groupOptimizer": "Optimization",
+  "training.groupRun": "Checkpoints and reproducibility",
+  "training.hint.ctx": "Training context length in tokens; must be >= chunk.",
+  "training.hint.chunk":
+    "Backprop chunk length; smaller saves memory and runs slower.",
+  "training.hint.batch_size":
+    "Samples per step, 1-128; lower this first when memory is tight.",
+  "training.hint.epochs": "How many full passes over the dataset.",
+  "training.hint.max_steps": "Hard cap on steps; 0 runs the full epochs.",
+  "training.hint.lr":
+    "Initial learning rate; state tuning usually sits around 5e-4.",
+  "training.hint.lr_final": "Decay target, which should be <= lr.",
+  "training.hint.warmup_steps": "Steps spent ramping the rate from 0 up to lr.",
+  "training.hint.save_every":
+    "Checkpoint interval in steps; 0 saves only at the end.",
+  "training.hint.seed": "Random seed, for reproducing a run.",
+  "training.lrFinalWarning":
+    "lr_final is above lr, so the rate would climb instead of decay.",
+
+  "training.metric": "Curve",
+  "training.metricLoss": "loss",
+  "training.metricLr": "lr",
+  "training.metricTps": "tok/s",
+  "training.smoothing": "Smoothing",
+  "training.chartEmpty": "Curves appear once training starts",
+  "training.chartHint": "Faint line is the raw value, solid line is the EMA.",
+
   "quant.title": "Quantization",
   "quant.subtitle":
     "Convert a BF16 checkpoint into a smaller .rwkvq. The output must not already exist and cannot be the input.",
@@ -807,12 +988,12 @@ const en: Record<MessageKey, string> = {
   "settings.batchSize": "batch size",
   "settings.currentNode": "Current node",
   "settings.nodeHint":
-    "Switching a node re-scopes Runtime, Training, Quantization and inference pages; these settings stay global.",
+    "Switching a node re-scopes the Inference service, Training and Quantization pages; these settings stay global.",
   "settings.saved": "Settings saved",
   "settings.storageWarning":
     "These actions only touch this browser's storage; they never affect models, states or jobs on a node.",
   "settings.passwordHint":
-    "The runtime password is kept in session memory only and never persisted.",
+    "The inference password is kept in session memory only and never persisted.",
   "settings.agentToken": "Agent token",
   "settings.resetTitle": "Local data",
 

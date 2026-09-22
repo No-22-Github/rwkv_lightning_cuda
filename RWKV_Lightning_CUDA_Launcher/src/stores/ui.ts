@@ -27,7 +27,8 @@ export const useToasts = create<ToastState>((set, get) => ({
     );
     return id;
   },
-  dismiss: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
+  dismiss: (id) =>
+    set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
   clear: () => set({ toasts: [] }),
 }));
 
@@ -64,6 +65,64 @@ export const useUI = create<UIState>((set) => ({
     set({ fsPicker, fsInitialPath }),
   closeFsBrowser: () => set({ fsPicker: null, fsInitialPath: "" }),
 }));
+
+/**
+ * Whether the page's own <h1> is on screen. The toolbar repeats the view name
+ * only once that heading scrolls away (HIG: omit a toolbar title when it is
+ * redundant; iOS large titles collapse into the bar the same way), so the name
+ * never appears twice at rest.
+ */
+interface PageTitleState {
+  inlineVisible: boolean;
+  setInlineVisible: (inlineVisible: boolean) => void;
+}
+
+export const usePageTitle = create<PageTitleState>((set) => ({
+  inlineVisible: false,
+  setInlineVisible: (inlineVisible) => set({ inlineVisible }),
+}));
+
+/**
+ * The log dock: one console at the bottom of the workspace that any page can
+ * open, showing whichever of the node's streams is selected. Logs used to be
+ * a card at the bottom of three separate pages, which meant they were only
+ * readable on the page that happened to own that stream.
+ */
+export type LogKind = "runtime" | "tuning" | "quantization";
+
+interface LogDockState {
+  open: boolean;
+  kind: LogKind;
+  /** Dock height in px, dragged by the grip on its top edge. */
+  height: number;
+  toggle: () => void;
+  show: (kind?: LogKind) => void;
+  hide: () => void;
+  setKind: (kind: LogKind) => void;
+  setHeight: (height: number) => void;
+}
+
+export const MIN_DOCK_HEIGHT = 140;
+export const MAX_DOCK_HEIGHT = 620;
+
+export const useLogDock = create(
+  persist<LogDockState>(
+    (set) => ({
+      open: false,
+      kind: "runtime",
+      height: 260,
+      toggle: () => set((s) => ({ open: !s.open })),
+      show: (kind) => set((s) => ({ open: true, kind: kind ?? s.kind })),
+      hide: () => set({ open: false }),
+      setKind: (kind) => set({ kind }),
+      setHeight: (height) =>
+        set({
+          height: Math.min(MAX_DOCK_HEIGHT, Math.max(MIN_DOCK_HEIGHT, height)),
+        }),
+    }),
+    { name: "rwkv-log-dock-v1", storage: createJSONStorage(() => storage) },
+  ),
+);
 
 /** Whether the workspace rail is collapsed; kept in localStorage. */
 interface RailState {

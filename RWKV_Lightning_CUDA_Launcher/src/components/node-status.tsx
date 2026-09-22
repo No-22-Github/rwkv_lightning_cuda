@@ -38,12 +38,16 @@ export function runtimeTone(runtime?: RuntimeState): StatusTone {
   }
 }
 
-export function runtimeLabel(t: TFn, runtime?: RuntimeState) {
+/**
+ * The state word alone, for rows that already name their subject (the node
+ * card's "runtime" field, for instance).
+ */
+export function runtimeStateLabel(t: TFn, runtime?: RuntimeState) {
   if (runtime?.status === "ready") {
     // The Agent detects a runtime it did not spawn, but cannot manage it.
     return runtime.managed === false
-      ? t("status.runtimeExternal")
-      : t("status.runtimeReady");
+      ? t("status.readyExternal")
+      : t("status.ready");
   }
   switch (runtime?.status) {
     case "starting":
@@ -57,8 +61,28 @@ export function runtimeLabel(t: TFn, runtime?: RuntimeState) {
     case "completed":
       return t("status.completed");
     default:
-      return t("status.runtimeOffline");
+      return t("status.notStarted");
   }
+}
+
+/**
+ * Subject + state, for chips that stand on their own. A bare "runtime
+ * offline" in the header sat next to a node that answers every probe and read
+ * as "the whole machine is down"; naming the subject keeps a not-yet-started
+ * inference server distinct from an unreachable node.
+ */
+export function runtimeLabel(t: TFn, runtime?: RuntimeState) {
+  return t("status.runtimeState", { state: runtimeStateLabel(t, runtime) });
+}
+
+/**
+ * The tooltip that disambiguates the one status people misread: reachable
+ * node, inference server simply not started yet.
+ */
+export function runtimeHint(t: TFn, runtime?: RuntimeState) {
+  return !runtime || runtime.status === "offline"
+    ? t("status.notStartedHint")
+    : undefined;
 }
 
 /**
@@ -136,39 +160,51 @@ export function CapabilityBadges({
   );
 }
 
+/**
+ * One card per GPU, three lines tall and narrow enough that a 4- or 8-card
+ * box tiles instead of scrolling: index + utilization on the headline, the
+ * memory bar under it, temperature and power on the footer line. The full
+ * NVML name only fits on wide cards, so it is the part allowed to truncate.
+ */
 export function GpuCard({ gpu }: { gpu: GpuMetric }) {
   const used = percent(gpu.memory_used_bytes, gpu.memory_total_bytes);
   const utilization = gpu.utilization_percent;
   const hot = utilization !== undefined && utilization > 85;
   return (
-    <div className="rounded-lg border border-border bg-background p-3">
-      <div className="flex items-center justify-between gap-2">
-        <span className="min-w-0 truncate text-[12.5px] font-medium">
-          #{gpu.index} · {compactGpuName(gpu.name)}
+    <div className="rounded-lg border border-border bg-background px-2.5 py-2">
+      <div className="flex items-baseline gap-2">
+        <span className="shrink-0 font-mono text-[12px] font-semibold">
+          #{gpu.index}
         </span>
-        <span className="shrink-0 font-mono text-[11.5px] text-muted-foreground">
+        <span
+          className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground"
+          title={gpu.name}
+        >
+          {compactGpuName(gpu.name)}
+        </span>
+        <span className="flex shrink-0 items-center gap-1.5 font-mono text-[11.5px] tabular-nums">
+          <StatusDot tone={hot ? "warn" : "ok"} />
+          {utilization !== undefined ? `${utilization}%` : "—"}
+        </span>
+      </div>
+      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
+        <div
+          className={cn(
+            "h-full rounded-full",
+            used > 90 ? "bg-destructive" : hot ? "bg-warning" : "bg-success",
+          )}
+          style={{ width: `${used}%` }}
+        />
+      </div>
+      <div className="mt-1 flex justify-between gap-2 font-mono text-[10.5px] whitespace-nowrap tabular-nums text-muted-foreground">
+        <span className="truncate">
+          {formatGigabytePair(gpu.memory_used_bytes, gpu.memory_total_bytes)}
+        </span>
+        <span className="shrink-0">
           {gpu.temperature_c !== undefined ? `${gpu.temperature_c}°C` : "—"}
           {" · "}
           {gpu.power_watts !== undefined ? `${gpu.power_watts}W` : "—"}
         </span>
-      </div>
-      <div className="mt-2.5 flex items-center gap-2.5">
-        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-          <div
-            className={cn(
-              "h-full rounded-full",
-              used > 90 ? "bg-destructive" : hot ? "bg-warning" : "bg-success",
-            )}
-            style={{ width: `${used}%` }}
-          />
-        </div>
-        <span className="shrink-0 font-mono text-[11.5px] whitespace-nowrap tabular-nums text-muted-foreground">
-          {formatGigabytePair(gpu.memory_used_bytes, gpu.memory_total_bytes)}
-        </span>
-      </div>
-      <div className="mt-1.5 flex items-center gap-2 text-[11.5px] text-muted-foreground">
-        <StatusDot tone={hot ? "warn" : "ok"} />
-        {utilization !== undefined ? `${utilization}%` : "—"}
       </div>
     </div>
   );
@@ -266,10 +302,10 @@ export function GpuList({
 }) {
   if (metrics?.available && metrics.gpus.length > 0) {
     return (
-      // Auto-fill columns: two cards side by side on the runtime page, more
-      // on wide screens, so an 8-GPU box wraps instead of growing a column
-      // that runs off the page.
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-2.5">
+      // Auto-fill columns: the card is legible from ~190px, so a full-width
+      // panel tiles four across on a laptop and more on a workstation. An
+      // 8-GPU box is then two rows, not a screen and a half of scrolling.
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(190px,1fr))] gap-2">
         {metrics.gpus.map((gpu) => (
           <GpuCard key={gpu.index} gpu={gpu} />
         ))}

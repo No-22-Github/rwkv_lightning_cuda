@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
+import { ChevronRight, RotateCcw } from "lucide-react";
 import { AdapterManager } from "@/components/chat/adapter-manager";
 import { StateManager } from "@/components/chat/state-manager";
 import { Button } from "@/components/ui/button";
 import { Segmented } from "@/components/ui/field";
 import { Separator } from "@/components/ui/primitives";
+import { SliderField } from "@/components/ui/slider";
 import { Select } from "@/components/ui/select";
 import { inferenceApi } from "@/lib/api/inference";
 import type { AdapterEntry, UploadedState } from "@/lib/api/types";
 import { useI18n } from "@/lib/i18n";
-import { useSettings } from "@/stores/settings";
+import { defaultGeneration, useSettings } from "@/stores/settings";
 
 type ThinkType = "fast" | "free";
 
@@ -32,47 +34,6 @@ function decodeAdapter(value: string): [string, string] {
   return ["", ""];
 }
 
-function SliderRow({
-  label,
-  value,
-  min,
-  max,
-  step,
-  disabled,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step: number;
-  disabled?: boolean;
-  onChange: (value: number) => void;
-}) {
-  return (
-    <div className="min-w-0">
-      <div className="flex items-center justify-between gap-2">
-        <span className="truncate text-[11.5px] text-muted-foreground">
-          {label}
-        </span>
-        <span className="shrink-0 font-mono text-[11.5px] text-muted-foreground">
-          {value}
-        </span>
-      </div>
-      <input
-        type="range"
-        className="w-full"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        disabled={disabled}
-        onChange={(event) => onChange(Number(event.target.value))}
-      />
-    </div>
-  );
-}
-
 /** Right-hand column of the chat page: generation settings and node assets. */
 export function GenerationPanel({ backendId }: { backendId: string }) {
   const { t } = useI18n();
@@ -82,6 +43,7 @@ export function GenerationPanel({ backendId }: { backendId: string }) {
   const [statesFailed, setStatesFailed] = useState(false);
   const [adapters, setAdapters] = useState<AdapterEntry[]>([]);
   const [adaptersError, setAdaptersError] = useState("");
+  const [penaltiesOpen, setPenaltiesOpen] = useState(false);
   const [statesOpen, setStatesOpen] = useState(false);
   const [adaptersOpen, setAdaptersOpen] = useState(false);
   const [revision, setRevision] = useState(0);
@@ -117,7 +79,9 @@ export function GenerationPanel({ backendId }: { backendId: string }) {
       .catch((cause: unknown) => {
         if (controller.signal.aborted) return;
         setAdapters([]);
-        setAdaptersError(cause instanceof Error ? cause.message : String(cause));
+        setAdaptersError(
+          cause instanceof Error ? cause.message : String(cause),
+        );
       });
     return () => controller.abort();
   }, [backendId, revision]);
@@ -146,31 +110,123 @@ export function GenerationPanel({ backendId }: { backendId: string }) {
   return (
     <div className="space-y-3.5">
       <section className="space-y-3">
-        <h2 className="text-[12.5px] font-semibold">{t("chat.generation")}</h2>
-        <SliderRow
+        <div className="flex items-center gap-2">
+          <h2 className="text-[12.5px] font-semibold">
+            {t("chat.generation")}
+          </h2>
+          <div className="flex-1" />
+          <button
+            type="button"
+            title={t("chat.resetGeneration")}
+            aria-label={t("chat.resetGeneration")}
+            className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            onClick={() =>
+              setGeneration({
+                temperature: defaultGeneration.temperature,
+                top_p: defaultGeneration.top_p,
+                top_k: defaultGeneration.top_k,
+                max_tokens: defaultGeneration.max_tokens,
+                alpha_presence: defaultGeneration.alpha_presence,
+                alpha_frequency: defaultGeneration.alpha_frequency,
+                alpha_decay: defaultGeneration.alpha_decay,
+              })
+            }
+          >
+            <RotateCcw className="size-3.5" />
+          </button>
+        </div>
+        <SliderField
           label={t("chat.temperature")}
+          hint={t("chat.temperatureHint")}
           value={generation.temperature}
           min={0}
           max={2}
-          step={0.1}
+          step={0.05}
           onChange={(value) => setGeneration({ temperature: value })}
         />
-        <SliderRow
+        <SliderField
           label={t("chat.topP")}
+          hint={t("chat.topPHint")}
           value={generation.top_p}
           min={0}
           max={1}
           step={0.05}
           onChange={(value) => setGeneration({ top_p: value })}
         />
-        <SliderRow
+        <SliderField
+          label={t("chat.topK")}
+          hint={t("chat.topKHint")}
+          value={generation.top_k}
+          min={0}
+          max={200}
+          step={1}
+          onChange={(value) => setGeneration({ top_k: value })}
+        />
+        {/* The native default is 8192; a 4096 cap silently truncated long
+            answers on nodes configured for more. */}
+        <SliderField
           label={t("chat.maxTokens")}
+          hint={t("chat.maxTokensHint")}
           value={generation.max_tokens}
           min={64}
-          max={4096}
+          max={8192}
           step={64}
           onChange={(value) => setGeneration({ max_tokens: value })}
         />
+
+        {/* Repetition penalties are the parameters people reach for when a
+            model loops, but they are three of seven: folded away behind a
+            summary that still shows where they sit. */}
+        <details
+          className="group rounded-lg border border-border px-2.5 py-2"
+          open={penaltiesOpen}
+          onToggle={(event) =>
+            setPenaltiesOpen((event.currentTarget as HTMLDetailsElement).open)
+          }
+        >
+          <summary className="flex cursor-pointer list-none items-center gap-1.5 text-[11.5px] text-muted-foreground marker:content-none">
+            <ChevronRight className="size-3 shrink-0 transition-transform group-open:rotate-90" />
+            <span className="min-w-0 flex-1 truncate">
+              {t("chat.penalties")}
+            </span>
+            <span className="shrink-0 font-mono text-[10.5px] tabular-nums">
+              {generation.alpha_presence} · {generation.alpha_frequency} ·{" "}
+              {generation.alpha_decay}
+            </span>
+          </summary>
+          <div className="mt-2.5 space-y-3">
+            <SliderField
+              label={t("chat.alphaPresence")}
+              hint={t("chat.alphaPresenceHint")}
+              value={generation.alpha_presence}
+              min={0}
+              max={4}
+              step={0.05}
+              onChange={(value) => setGeneration({ alpha_presence: value })}
+            />
+            <SliderField
+              label={t("chat.alphaFrequency")}
+              hint={t("chat.alphaFrequencyHint")}
+              value={generation.alpha_frequency}
+              min={0}
+              max={4}
+              step={0.05}
+              onChange={(value) => setGeneration({ alpha_frequency: value })}
+            />
+            <SliderField
+              label={t("chat.alphaDecay")}
+              hint={t("chat.alphaDecayHint")}
+              value={generation.alpha_decay}
+              min={0.9}
+              max={1}
+              step={0.001}
+              onChange={(value) => setGeneration({ alpha_decay: value })}
+            />
+            <p className="text-[10.5px] leading-snug text-muted-foreground/80">
+              {t("chat.penaltiesHint")}
+            </p>
+          </div>
+        </details>
       </section>
 
       <Separator />

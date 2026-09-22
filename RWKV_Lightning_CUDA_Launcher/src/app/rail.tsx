@@ -6,31 +6,26 @@ import {
   Languages,
   MessageSquare,
   PanelLeft,
-  Play,
-  RotateCcw,
   Server,
   Settings2,
-  Square,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { BackendSwitcher } from "@/app/backend-switcher";
 import { useCurrent } from "@/app/use-current";
-import { RuntimeBadge } from "@/components/runtime-controls";
-import {
-  gpuUnavailableReason,
-  GpuMiniRows,
-} from "@/components/node-status";
+import { NodeProcessList } from "@/components/node-processes";
+import { gpuUnavailableReason, GpuMiniRows } from "@/components/node-status";
 import { StatusDot } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { applyDevice } from "@/lib/api/launcher";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { useI18n, type MessageKey } from "@/lib/i18n";
 import { navigate, useRoute, type Route } from "@/lib/router";
 import { cn } from "@/lib/utils";
-import { useRuntimeFormEntry } from "@/stores/forms";
 import { useBackends } from "@/stores/backends";
-import { useNodes } from "@/stores/nodes";
-import { toast, useRail } from "@/stores/ui";
+import { useRail } from "@/stores/ui";
 
 interface NavItem {
   route: Route;
@@ -71,49 +66,57 @@ export function Rail() {
   return (
     <aside
       className={cn(
-        "flex min-h-0 flex-col gap-0.5 border-r border-border bg-card p-2.5 transition-[width] duration-200",
+        "flex min-h-0 flex-col border-r border-border bg-card p-2.5 transition-[width] duration-200",
         collapsed ? "w-14" : "w-[216px]",
       )}
     >
-      {SECTIONS.map((section) => (
-        <div key={section.title} className="contents">
-          <p
-            className={cn(
-              "overflow-hidden px-2 pt-3.5 pb-1 text-[10.5px] font-semibold tracking-[0.06em] whitespace-nowrap text-muted-foreground transition-opacity",
-              collapsed ? "opacity-0" : "opacity-100",
-            )}
-          >
-            {t(section.title)}
-          </p>
-          {section.items.map((item) => (
-            <NavButton
-              key={item.route}
-              item={item}
-              active={route === item.route}
-              collapsed={collapsed}
-              count={item.route === "nodes" ? backendCount : undefined}
-              dot={
-                item.route === "runtime" ? (
-                  <RuntimeDot />
-                ) : item.route === "training" && trainingRunning ? (
-                  <StatusDot tone="warn" pulse />
-                ) : undefined
-              }
-            />
-          ))}
+      {/* The node card at the bottom is the one control that must never be
+          pushed off a short window, so the nav scrolls and the card stays. */}
+      <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-x-hidden overflow-y-auto">
+        {SECTIONS.map((section) => (
+          <div key={section.title} className="contents">
+            <p
+              className={cn(
+                "overflow-hidden px-2 pt-3.5 pb-1 text-[10.5px] font-semibold tracking-[0.06em] whitespace-nowrap text-muted-foreground transition-opacity",
+                collapsed ? "opacity-0" : "opacity-100",
+              )}
+            >
+              {t(section.title)}
+            </p>
+            {section.items.map((item) => (
+              <NavButton
+                key={item.route}
+                item={item}
+                active={route === item.route}
+                collapsed={collapsed}
+                count={item.route === "nodes" ? backendCount : undefined}
+                dot={
+                  item.route === "runtime" ? (
+                    <RuntimeDot />
+                  ) : item.route === "training" && trainingRunning ? (
+                    // Steady, not pulsing: training runs for hours.
+                    <StatusDot tone="warn" />
+                  ) : undefined
+                }
+              />
+            ))}
+          </div>
+        ))}
+      </div>
+
+      {/* flex, like the scrolling nav above: a <button> is a form control, so
+          width:auto shrinks it to its label. Only the stretch of a flex
+          column made the nav rows full width, which is why Settings came out
+          a size smaller once it moved into this block. */}
+      <div className="flex shrink-0 flex-col pt-2">
+        <NavButton
+          item={{ route: "settings", label: "nav.settings", icon: Settings2 }}
+          active={route === "settings"}
+          collapsed={collapsed}
+        />
+        <div className="relative mt-2">
+          {collapsed ? <CollapsedFooter /> : <BackendSwitcher />}
         </div>
-      ))}
-
-      <div className="min-h-3.5 flex-1" />
-
-      <NavButton
-        item={{ route: "settings", label: "nav.settings", icon: Settings2 }}
-        active={route === "settings"}
-        collapsed={collapsed}
-      />
-
-      <div className="relative mt-2">
-        {collapsed ? <CollapsedFooter /> : <BackendSwitcher />}
       </div>
     </aside>
   );
@@ -145,7 +148,9 @@ function NavButton({
       )}
     >
       <Icon className="size-4 shrink-0 text-muted-foreground" />
-      {!collapsed && <span className="min-w-0 flex-1 truncate">{t(item.label)}</span>}
+      {!collapsed && (
+        <span className="min-w-0 flex-1 truncate">{t(item.label)}</span>
+      )}
       {!collapsed && count ? (
         <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
           {count}
@@ -171,29 +176,28 @@ function RuntimeDot() {
 /** Collapsed rail keeps the node identity and a GPU peek on hover. */
 function CollapsedFooter() {
   const { t } = useI18n();
-  const { backendId, backend, runtime, metrics, metricsError, hasAgent, busy } =
-    useCurrent();
-  const { config: form, devices } = useRuntimeFormEntry(backendId);
-  const start = useNodes((s) => s.startRuntime);
-  const stop = useNodes((s) => s.stopRuntime);
-  const restart = useNodes((s) => s.restartRuntime);
+  const { backend, runtime, metrics, metricsError } = useCurrent();
   const toggle = useRail((s) => s.toggle);
   const [peek, setPeek] = useState(false);
   const gpus = metrics?.available ? metrics.gpus : [];
-  const disabled = !backendId || !hasAgent || !backend?.reachable;
 
-  const run = async (action: () => Promise<void>, message: string) => {
-    try {
-      await action();
-      toast.success(message);
-    } catch (error) {
-      toast.error(
-        t("toast.failed", {
-          error: error instanceof Error ? error.message : String(error),
-        }),
-      );
-    }
-  };
+  // A collapsed rail is 56px wide, ~24px of it drawable: one bar per card
+  // overflowed the rail the moment a box had more than three GPUs. Aggregate
+  // instead — average fill, peak colour, card count — and leave the per-card
+  // detail to the peek popover, which is where it is readable anyway.
+  const utilization = gpus.map((gpu) => gpu.utilization_percent ?? 0);
+  const average = utilization.length
+    ? Math.round(
+        utilization.reduce((sum, u) => sum + u, 0) / utilization.length,
+      )
+    : 0;
+  const peak = utilization.length ? Math.max(...utilization) : 0;
+  const gpuSummary =
+    gpus.length > 1
+      ? t("rail.gpuSummary", { count: gpus.length, avg: average })
+      : gpus.length === 1
+        ? t("rail.gpuSummaryOne", { avg: average })
+        : gpuUnavailableReason(t, metrics, metricsError, backend);
 
   return (
     <div className="grid gap-2">
@@ -201,7 +205,8 @@ function CollapsedFooter() {
         <PopoverTrigger asChild>
           <button
             type="button"
-            className="rounded-xl border border-border bg-background px-2 py-2.5 transition-colors hover:bg-muted"
+            title={`${backend?.name ?? ""} · ${gpuSummary}`.replace(/^ · /, "")}
+            className="w-full overflow-hidden rounded-xl border border-border bg-background px-1.5 py-2.5 transition-colors hover:bg-muted"
             aria-label={t("backend.registered")}
           >
             <span
@@ -214,32 +219,23 @@ function CollapsedFooter() {
                   : "bg-destructive",
               )}
             />
-            <span className="flex h-14 items-end justify-center gap-1.5">
-              {gpus.length > 0 ? (
-                gpus.slice(0, 4).map((gpu) => {
-                  const util = gpu.utilization_percent ?? 0;
-                  return (
-                    <span
-                      key={gpu.index}
-                      className="flex h-14 w-[5px] items-end overflow-hidden rounded-full bg-muted"
-                    >
-                      <span
-                        className={cn(
-                          "block w-[5px] rounded-full",
-                          util > 85 ? "bg-warning" : "bg-success",
-                        )}
-                        style={{ height: `${Math.max(util, 2)}%` }}
-                      />
-                    </span>
-                  );
-                })
-              ) : (
-                <span className="block h-14 w-[5px] rounded-full bg-muted" />
+            <span className="mx-auto flex h-12 w-1.5 items-end overflow-hidden rounded-full bg-muted">
+              {gpus.length > 0 && (
+                <span
+                  className={cn(
+                    "block w-1.5 rounded-full",
+                    peak > 85 ? "bg-warning" : "bg-success",
+                  )}
+                  style={{ height: `${Math.max(average, 2)}%` }}
+                />
               )}
+            </span>
+            <span className="mt-1.5 block text-center font-mono text-[9px] leading-none tabular-nums text-muted-foreground">
+              {gpus.length > 0 ? gpus.length : "—"}
             </span>
           </button>
         </PopoverTrigger>
-        <PopoverContent side="right" align="end" className="w-[250px]">
+        <PopoverContent side="right" align="end" className="w-[300px]">
           <div className="border-b border-border px-3 py-2.5">
             <div className="flex items-center gap-2">
               <StatusDot
@@ -255,7 +251,8 @@ function CollapsedFooter() {
             </p>
           </div>
           {metrics?.available && gpus.length > 0 ? (
-            <div className="px-3 py-2.5">
+            // An 8-GPU box would otherwise grow the popover past the viewport.
+            <div className="max-h-[248px] overflow-x-hidden overflow-y-auto px-3 py-2.5">
               <GpuMiniRows metrics={metrics} />
             </div>
           ) : (
@@ -263,39 +260,17 @@ function CollapsedFooter() {
               {gpuUnavailableReason(t, metrics, metricsError, backend)}
             </p>
           )}
-          <div className="flex gap-1.5 border-t border-border p-2">
-            <Button
-              size="xs"
-              variant="default"
-              disabled={disabled || busy || runtime?.running || !form.model_path.trim()}
-              onClick={() =>
-                void run(
-                  () => start(backendId, applyDevice({ ...form }, devices)),
-                  t("runtime.started"),
-                )
-              }
-            >
-              <Play className="size-3" />
-            </Button>
-            <Button
-              size="xs"
-              disabled={disabled || busy || !runtime?.running}
-              onClick={() => void run(() => stop(backendId), t("runtime.stopped"))}
-            >
-              <Square className="size-3" />
-            </Button>
-            <Button
-              size="xs"
-              disabled={disabled || busy || !runtime?.running}
-              onClick={() =>
-                void run(() => restart(backendId), t("runtime.restarted"))
-              }
-            >
-              <RotateCcw className="size-3" />
-            </Button>
+          {/* The same three process rows the header menu shows: one
+              implementation of "start this / stop that", wherever it is
+              reached from. */}
+          <div className="border-t border-border">
+            <NodeProcessList />
+          </div>
+          <div className="flex border-t border-border p-2">
             <div className="flex-1" />
             <Button
               size="xs"
+              title={t("header.expandSidebar")}
               onClick={() => {
                 setPeek(false);
                 toggle();
@@ -324,5 +299,3 @@ export function RailToggle() {
     </Button>
   );
 }
-
-export { RuntimeBadge };

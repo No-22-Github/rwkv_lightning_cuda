@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { Info, Loader2, MonitorPlay } from "lucide-react";
+import { Info, Loader2, MonitorPlay, ScrollText } from "lucide-react";
 import { useCurrent } from "@/app/use-current";
 import { PageHeader, PathField } from "@/components/common";
 import { DeviceSelector } from "@/components/device-selector";
-import { LogViewer } from "@/components/log-viewer";
 import {
   GpuList,
   modelName,
@@ -11,7 +10,7 @@ import {
   runtimeTone,
 } from "@/components/node-status";
 import { RuntimeControls } from "@/components/runtime-controls";
-import { StatusDot } from "@/components/ui/badge";
+import { StatusPill } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CheckboxField, Field } from "@/components/ui/field";
@@ -22,10 +21,12 @@ import { inferenceApi } from "@/lib/api/inference";
 import type { DeviceSelection, RuntimeConfig } from "@/lib/api/types";
 import { useI18n } from "@/lib/i18n";
 import { useRuntimeForm, useRuntimeFormEntry } from "@/stores/forms";
-import { useLogs, useLogStream } from "@/stores/logs";
 import { useNodes } from "@/stores/nodes";
-import { toast } from "@/stores/ui";
+import { toast, useLogDock } from "@/stores/ui";
 import { NoNodeNotice } from "@/pages/nodes-page";
+
+/** Spacing for the reachable → runtime → model chain at the top of the page. */
+const STRIP_PILL = "px-3.5 first:pl-0";
 
 export function RuntimePage() {
   const { t } = useI18n();
@@ -50,20 +51,10 @@ export function RuntimePage() {
     (selection: DeviceSelection) => setDeviceSelection(backendId, selection),
     [backendId, setDeviceSelection],
   );
-  const logs = useLogStream(backendId, "runtime");
-  const openLogs = useLogs((s) => s.open);
-  const closeLogs = useLogs((s) => s.close);
 
   const [models, setModels] = useState<string[]>([]);
   const [selectedModel, setSelectedModel] = useState("");
   const [loadingModel, setLoadingModel] = useState(false);
-
-  // Live runtime logs while this page is mounted.
-  useEffect(() => {
-    if (!backendId || !hasAgent) return;
-    openLogs(backendId, "runtime");
-    return () => closeLogs(backendId, "runtime");
-  }, [backendId, hasAgent, openLogs, closeLogs]);
 
   // Seed this node's form from what this node is actually running, so opening
   // a node shows its own configuration rather than whichever node was last
@@ -99,6 +90,18 @@ export function RuntimePage() {
 
   const inferenceOnly = backend?.kind === "inference_only";
 
+  const gpus = metrics?.available ? metrics.gpus : [];
+  const gpuSummary =
+    gpus.length > 0
+      ? t("rail.gpuSummary", {
+          count: gpus.length,
+          avg: Math.round(
+            gpus.reduce((sum, gpu) => sum + (gpu.utilization_percent ?? 0), 0) /
+              gpus.length,
+          ),
+        })
+      : "";
+
   return (
     <div className="mx-auto max-w-[1240px] px-6 pt-5.5 pb-10">
       <PageHeader
@@ -128,35 +131,58 @@ export function RuntimePage() {
 
       <div className="mt-4.5 flex flex-wrap items-center gap-x-0 gap-y-2 rounded-xl border border-border bg-card px-3.5 py-3">
         <StatusPill
+          size="md"
+          className={STRIP_PILL}
           tone={backend?.reachable ? "ok" : "bad"}
-          label={t("runtime.nodeReachable")}
+          label={
+            backend?.reachable ? t("status.reachable") : t("status.unreachable")
+          }
         />
         <Connector />
         <StatusPill
+          size="md"
+          className={STRIP_PILL}
           tone={runtimeTone(runtime)}
           label={runtimeLabel(t, runtime)}
         />
         <Connector />
         <StatusPill
+          size="md"
+          mono
+          className={STRIP_PILL}
+          labelClassName="max-w-[280px]"
           tone={runtime?.status === "ready" ? "ok" : "idle"}
           label={modelName(runtime) || t("status.noModel")}
-          mono
         />
         {runtime?.visible_devices ? (
           <>
             <Connector />
             <StatusPill
+              size="md"
+              mono
+              className={STRIP_PILL}
+              labelClassName="max-w-[280px]"
               tone="info"
               label={`${t("runtime.visibleDevices")}: ${
                 runtime.visible_devices || '""'
               }`}
-              mono
             />
           </>
         ) : null}
         <div className="flex-1" />
-        <span className="text-[11.5px] text-muted-foreground">
-          {t("runtime.polling")}
+        {/* The strip itself has no horizontal gap — the connectors provide it
+            — so this trailing pair brings its own. */}
+        <span className="flex items-center gap-2.5 pl-3.5">
+          <Button
+            size="xs"
+            onClick={() => useLogDock.getState().show("runtime")}
+          >
+            <ScrollText className="size-3.5" />
+            {t("runtime.logs")}
+          </Button>
+          <span className="text-[11.5px] text-muted-foreground">
+            {t("runtime.polling")}
+          </span>
         </span>
       </div>
 
@@ -325,60 +351,36 @@ export function RuntimePage() {
             </Field>
           </CardContent>
         </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>GPU</CardTitle>
-            <div className="flex-1" />
-            <span className="font-mono text-[11px] text-muted-foreground">
-              /api/v1/node/metrics
-            </span>
-          </CardHeader>
-          <CardContent>
-            <GpuList
-              metrics={metrics}
-              metricsError={metricsError}
-              backend={backend}
-              runtime={runtime}
-              t={t}
-            />
-          </CardContent>
-        </Card>
       </div>
 
-      <LogViewer
-        className="mt-3.5"
-        lines={logs.lines}
-        title={t("runtime.logs")}
-        endpoint="/api/v1/runtime/logs"
-        bodyClassName="max-h-[260px]"
-      />
+      {/* Full width, not one column of the form grid: inside a ~370px column
+          the card grid can only ever fit one card, so an 8-GPU box became a
+          column eight cards tall. Out here the same grid fits three or four
+          per row. */}
+      <Card className="mt-3.5">
+        <CardHeader>
+          <CardTitle>GPU</CardTitle>
+          {gpuSummary && (
+            <span className="truncate text-[11.5px] text-muted-foreground">
+              {gpuSummary}
+            </span>
+          )}
+          <div className="flex-1" />
+          <span className="font-mono text-[11px] text-muted-foreground">
+            /api/v1/node/metrics
+          </span>
+        </CardHeader>
+        <CardContent>
+          <GpuList
+            metrics={metrics}
+            metricsError={metricsError}
+            backend={backend}
+            runtime={runtime}
+            t={t}
+          />
+        </CardContent>
+      </Card>
     </div>
-  );
-}
-
-function StatusPill({
-  tone,
-  label,
-  mono,
-}: {
-  tone: "ok" | "warn" | "bad" | "info" | "idle";
-  label: string;
-  mono?: boolean;
-}) {
-  return (
-    <span className="flex items-center gap-2 px-3.5 first:pl-0">
-      <StatusDot tone={tone} />
-      <span
-        className={
-          mono
-            ? "max-w-[280px] truncate font-mono text-[12.5px] font-medium"
-            : "text-[12.5px] font-medium"
-        }
-      >
-        {label}
-      </span>
-    </span>
   );
 }
 

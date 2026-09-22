@@ -1,13 +1,11 @@
-import { Loader2, Play, RotateCcw, Square } from "lucide-react";
+import { Play, RotateCcw, Square } from "lucide-react";
 import { Button, type ButtonProps } from "@/components/ui/button";
-import { StatusPill } from "@/components/ui/badge";
 import { applyDevice } from "@/lib/api/launcher";
+import { useAction } from "@/lib/use-action";
 import { useI18n } from "@/lib/i18n";
 import { useCurrent } from "@/app/use-current";
 import { useRuntimeFormEntry } from "@/stores/forms";
 import { useNodes } from "@/stores/nodes";
-import { toast } from "@/stores/ui";
-import { runtimeLabel, runtimeTone } from "@/components/node-status";
 
 /**
  * Which of Start / Stop / Restart are usable, from two independent facts the
@@ -59,19 +57,7 @@ function useActions() {
   const start = useNodes((s) => s.startRuntime);
   const stop = useNodes((s) => s.stopRuntime);
   const restart = useNodes((s) => s.restartRuntime);
-
-  const run = async (action: () => Promise<void>, message: string) => {
-    try {
-      await action();
-      toast.success(message);
-    } catch (error) {
-      toast.error(
-        t("toast.failed", {
-          error: error instanceof Error ? error.message : String(error),
-        }),
-      );
-    }
-  };
+  const run = useAction();
 
   return {
     t,
@@ -132,26 +118,5 @@ export function RuntimeControls({
         </Button>
       </div>
     </div>
-  );
-}
-
-export function RuntimeBadge() {
-  const { t } = useI18n();
-  const { runtime, backend } = useCurrent();
-  const label = !backend?.reachable
-    ? t("status.unreachable")
-    : runtimeLabel(t, runtime);
-  const tone = !backend?.reachable ? "bad" : runtimeTone(runtime);
-  const spinning =
-    runtime?.status === "starting" || runtime?.status === "stopping";
-  return (
-    <span className="inline-flex h-6 items-center gap-1.5 rounded-full border border-border bg-muted px-2.5 text-[11.5px] text-muted-foreground">
-      {spinning ? (
-        <Loader2 className="size-3 animate-spin" />
-      ) : (
-        <StatusPill tone={tone} label="" />
-      )}
-      {label}
-    </span>
   );
 }

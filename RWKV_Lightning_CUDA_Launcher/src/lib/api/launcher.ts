@@ -25,6 +25,13 @@ export const defaultRuntime: RuntimeConfig = {
   tune_cache: "",
 };
 
+/** MiSS is adam-only; `state` keeps whatever the user picked. */
+export function effectiveOptimizer(
+  config: TuningConfig,
+): TuningConfig["optimizer"] {
+  return config.method === "miss" ? "adam" : config.optimizer;
+}
+
 export const defaultTuning: TuningConfig = {
   method: "state",
   model: "",

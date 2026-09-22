@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { generationBody } from "@/lib/api/client";
@@ -14,28 +15,159 @@ export interface ChatMessage {
   finishReason?: string;
 }
 
+/**
+ * One saved conversation. Sessions are scoped to a backend: switching nodes
+ * never mixes conversations, and a node's history survives the switch.
+ */
+export interface ChatSession {
+  id: string;
+  backendId: string;
+  /** Empty until the first user message names it; renameable afterwards. */
+  title: string;
+  messages: ChatMessage[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * How many conversations a single node keeps. Everything lives in
+ * localStorage, which is a few megabytes per origin, so the oldest untouched
+ * sessions are dropped rather than letting a quota error take the whole store
+ * down with them.
+ */
+const MAX_SESSIONS_PER_BACKEND = 60;
+
+/** Session title from its opening message: one line, trimmed to fit the list. */
+export function deriveTitle(text: string) {
+  const line = text.trim().split(/\r?\n/, 1)[0]?.trim() ?? "";
+  return line.length > 32 ? `${line.slice(0, 32)}…` : line;
+}
+
 interface ChatState {
-  /** One thread per backend ID: switching nodes never mixes conversations. */
-  threads: Record<string, ChatMessage[]>;
+  sessions: ChatSession[];
+  /** Selected session per backend ID. */
+  currentId: Record<string, string>;
   /** Backend ID currently streaming, or null. */
   active: string | null;
   send: (backendId: string, text: string, retry?: boolean) => Promise<void>;
   stop: () => void;
+  newSession: (backendId: string) => string;
+  selectSession: (backendId: string, sessionId: string) => void;
+  renameSession: (sessionId: string, title: string) => void;
+  deleteSession: (sessionId: string) => void;
+  /** Empties the current conversation without leaving a stub in the list. */
   reset: (backendId: string) => void;
   clearAll: () => void;
 }
 
 let controller: AbortController | null = null;
 
+const emptySession = (backendId: string): ChatSession => ({
+  id: crypto.randomUUID(),
+  backendId,
+  title: "",
+  messages: [],
+  createdAt: Date.now(),
+  updatedAt: Date.now(),
+});
+
+/** Newest first, so a list never has to sort twice. */
+const byRecency = (a: ChatSession, b: ChatSession) => b.updatedAt - a.updatedAt;
+
+function pruned(sessions: ChatSession[], backendId: string, keepId: string) {
+  const mine = sessions
+    .filter((session) => session.backendId === backendId)
+    .sort(byRecency);
+  if (mine.length <= MAX_SESSIONS_PER_BACKEND) return sessions;
+  const dropped = new Set(
+    mine
+      .slice(MAX_SESSIONS_PER_BACKEND)
+      .filter((session) => session.id !== keepId)
+      .map((session) => session.id),
+  );
+  return sessions.filter((session) => !dropped.has(session.id));
+}
+
 export const useChat = create(
   persist<ChatState>(
     (set, get) => ({
-      threads: {},
+      sessions: [],
+      currentId: {},
       active: null,
+
+      newSession: (backendId) => {
+        const session = emptySession(backendId);
+        set((s) => ({
+          // An untouched blank session is not worth keeping around: reuse it
+          // instead of stacking "新会话" entries every time the button is hit.
+          sessions: pruned(
+            [
+              ...s.sessions.filter(
+                (entry) =>
+                  entry.backendId !== backendId || entry.messages.length > 0,
+              ),
+              session,
+            ],
+            backendId,
+            session.id,
+          ),
+          currentId: { ...s.currentId, [backendId]: session.id },
+        }));
+        return session.id;
+      },
+
+      selectSession: (backendId, sessionId) =>
+        set((s) => ({ currentId: { ...s.currentId, [backendId]: sessionId } })),
+
+      renameSession: (sessionId, title) =>
+        set((s) => ({
+          sessions: s.sessions.map((session) =>
+            session.id === sessionId
+              ? { ...session, title: title.trim().slice(0, 64) }
+              : session,
+          ),
+        })),
+
+      deleteSession: (sessionId) =>
+        set((s) => {
+          const target = s.sessions.find((session) => session.id === sessionId);
+          const sessions = s.sessions.filter(
+            (session) => session.id !== sessionId,
+          );
+          const currentId = { ...s.currentId };
+          if (target && currentId[target.backendId] === sessionId) {
+            const next = sessions
+              .filter((session) => session.backendId === target.backendId)
+              .sort(byRecency)[0];
+            if (next) currentId[target.backendId] = next.id;
+            else delete currentId[target.backendId];
+          }
+          return { sessions, currentId };
+        }),
+
+      reset: (backendId) =>
+        set((s) => {
+          const id = s.currentId[backendId];
+          return {
+            sessions: s.sessions.map((session) =>
+              session.id === id
+                ? { ...session, messages: [], updatedAt: Date.now() }
+                : session,
+            ),
+          };
+        }),
 
       send: async (backendId, text, retry = false) => {
         if (!backendId || get().active) return;
-        const existing = get().threads[backendId] ?? [];
+
+        let sessionId = get().currentId[backendId];
+        if (!get().sessions.some((session) => session.id === sessionId))
+          sessionId = get().newSession(backendId);
+
+        const session = get().sessions.find(
+          (entry) => entry.id === sessionId,
+        ) as ChatSession;
+        const existing = session.messages;
         if (retry ? existing.length === 0 : !text.trim()) return;
 
         let history: ChatMessage[];
@@ -58,10 +190,26 @@ export const useChat = create(
         };
         controller = new AbortController();
         const signal = controller.signal;
-        set((s) => ({
-          threads: { ...s.threads, [backendId]: [...history, reply] },
-          active: backendId,
-        }));
+
+        const write = (messages: ChatMessage[], title?: string) =>
+          set((s) => ({
+            sessions: s.sessions.map((entry) =>
+              entry.id === sessionId
+                ? {
+                    ...entry,
+                    messages,
+                    title: title ?? entry.title,
+                    updatedAt: Date.now(),
+                  }
+                : entry,
+            ),
+          }));
+
+        write(
+          [...history, reply],
+          session.title || deriveTitle(history[0]?.content ?? ""),
+        );
+        set({ active: backendId });
 
         // Throttle store writes: a token stream would otherwise re-render on
         // every single SSE frame.
@@ -72,12 +220,17 @@ export const useChat = create(
             timer = undefined;
           }
           set((s) => ({
-            threads: {
-              ...s.threads,
-              [backendId]: (s.threads[backendId] ?? []).map((m) =>
-                m.id === reply.id ? { ...reply } : m,
-              ),
-            },
+            sessions: s.sessions.map((entry) =>
+              entry.id === sessionId
+                ? {
+                    ...entry,
+                    messages: entry.messages.map((m) =>
+                      m.id === reply.id ? { ...reply } : m,
+                    ),
+                    updatedAt: Date.now(),
+                  }
+                : entry,
+            ),
           }));
         };
 
@@ -116,32 +269,86 @@ export const useChat = create(
 
       stop: () => controller?.abort(),
 
-      reset: (backendId) =>
-        set((s) => {
-          const threads = { ...s.threads };
-          delete threads[backendId];
-          return { threads };
-        }),
-
       clearAll: () => {
         controller?.abort();
         controller = null;
-        set({ threads: {}, active: null });
+        set({ sessions: [], currentId: {}, active: null });
       },
     }),
     {
-      name: "rwkv-chat-v2",
-      version: 2,
+      name: "rwkv-chat-v3",
+      version: 3,
       storage: createJSONStorage(() => storage),
-      partialize: (s) => ({ threads: s.threads }) as ChatState,
+      partialize: (s) =>
+        ({ sessions: s.sessions, currentId: s.currentId }) as ChatState,
+      migrate: (persisted, version) => {
+        if (version >= 3) return persisted as ChatState;
+        // v2 kept exactly one unnamed thread per backend; carry each one over
+        // as that node's first saved session instead of dropping the history.
+        const legacy = (
+          persisted as { threads?: Record<string, ChatMessage[]> }
+        )?.threads;
+        const sessions: ChatSession[] = [];
+        const currentId: Record<string, string> = {};
+        for (const [backendId, messages] of Object.entries(legacy ?? {})) {
+          if (!messages?.length) continue;
+          const session = {
+            ...emptySession(backendId),
+            messages,
+            title: deriveTitle(
+              messages.find((m) => m.role === "user")?.content ?? "",
+            ),
+          };
+          sessions.push(session);
+          currentId[backendId] = session.id;
+        }
+        return { sessions, currentId } as ChatState;
+      },
     },
   ),
 );
 
 const EMPTY_THREAD: ChatMessage[] = [];
 
+/** The current session's messages, outside React. */
+export function currentThread(backendId: string) {
+  const { sessions, currentId } = useChat.getState();
+  return (
+    sessions.find((session) => session.id === currentId[backendId])?.messages ??
+    EMPTY_THREAD
+  );
+}
+
 export function useThread(backendId: string) {
-  return useChat((s) => s.threads[backendId] ?? EMPTY_THREAD);
+  const sessions = useChat((s) => s.sessions);
+  const sessionId = useChat((s) => s.currentId[backendId]);
+  return useMemo(
+    () =>
+      sessions.find((session) => session.id === sessionId)?.messages ??
+      EMPTY_THREAD,
+    [sessions, sessionId],
+  );
+}
+
+/** A node's saved conversations, newest first. */
+export function useSessions(backendId: string) {
+  const sessions = useChat((s) => s.sessions);
+  return useMemo(
+    () =>
+      sessions
+        .filter((session) => session.backendId === backendId)
+        .sort(byRecency),
+    [sessions, backendId],
+  );
+}
+
+export function useCurrentSession(backendId: string) {
+  const sessions = useChat((s) => s.sessions);
+  const sessionId = useChat((s) => s.currentId[backendId]);
+  return useMemo(
+    () => sessions.find((session) => session.id === sessionId),
+    [sessions, sessionId],
+  );
 }
 
 export function useStreaming(backendId: string) {
