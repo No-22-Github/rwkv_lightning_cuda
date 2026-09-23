@@ -15,7 +15,7 @@ export function Toaster() {
           type="button"
           onClick={() => dismiss(toast.id)}
           className={cn(
-            "pointer-events-auto flex animate-fade-in items-start gap-2.5 rounded-xl border bg-card px-3.5 py-3 text-left shadow-[0_16px_40px_rgba(0,0,0,0.4)]",
+            "pointer-events-auto flex animate-fade-in items-start gap-2.5 rounded-xl border bg-card px-3.5 py-3 text-left shadow-lift",
             toast.variant === "error" && "border-destructive/50",
             toast.variant === "success" && "border-success/40",
             toast.variant === "default" && "border-border",

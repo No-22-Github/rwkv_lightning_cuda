@@ -36,7 +36,7 @@ export function DialogContent({
         style={{ width }}
         className={cn(
           "fixed top-1/2 left-1/2 z-80 max-h-[86vh] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2",
-          "flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-[0_24px_60px_rgba(0,0,0,0.45)] outline-none",
+          "flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-modal outline-none",
           className,
         )}
         {...props}

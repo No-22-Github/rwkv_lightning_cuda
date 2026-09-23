@@ -126,6 +126,15 @@
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
 
+  /* Elevation, in three tiers. The distinction carries more weight than the
+     numbers: a card that grows inside the page's own layout must not look
+     like it floats, and the two things that do float sit at different heights
+     because a dialog owns the screen behind it — it dims it — while a popover
+     is only passing through. Keep every surface on one of these. */
+  --shadow-flat: 0 1px 2px rgb(0 0 0 / 0.06); /* in-flow cards */
+  --shadow-lift: 0 8px 24px rgb(0 0 0 / 0.14); /* popovers, toasts */
+  --shadow-modal: 0 16px 48px rgb(0 0 0 / 0.22); /* dialogs, over a scrim */
+
   --animate-pulse-dot: pulse-dot 1.6s ease-in-out infinite;
   --animate-fade-in: fade-in 0.16s ease-out;
 }
