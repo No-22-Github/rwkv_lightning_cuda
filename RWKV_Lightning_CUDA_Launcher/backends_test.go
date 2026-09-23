@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -70,6 +71,87 @@ func TestRegistryPersistence(t *testing.T) {
 }
 
 // TestBackendsViewNeverLeaksToken is the M2 negative test #1.
+func TestRegistryUpdate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "launcher.json")
+	rg := openRegistry(path)
+	e, err := rg.add("4090", "http://100.64.0.10:18766", "abc123")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	name := "pro6000 · 8"
+	updated, err := rg.update(e.ID, &name, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The id is what the console holds on to; an edit must not move it.
+	if updated.ID != e.ID {
+		t.Errorf("id changed: %q -> %q", e.ID, updated.ID)
+	}
+	if updated.Name != name {
+		t.Errorf("name = %q, want %q", updated.Name, name)
+	}
+	if updated.BaseURL != e.BaseURL || updated.Token != e.Token {
+		t.Errorf("untouched fields changed: %+v", updated)
+	}
+
+	url := "https://node.example.com/"
+	next, err := rg.update(e.ID, nil, &url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.BaseURL != "https://node.example.com" {
+		t.Errorf("base_url = %q, want the trailing slash trimmed", next.BaseURL)
+	}
+	if next.Name != name {
+		t.Errorf("name = %q, want it left alone", next.Name)
+	}
+
+	// An empty token means "keep the stored one": the console never sees it.
+	if _, err := rg.update(e.ID, nil, nil, ptr("")); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := rg.lookup(e.ID)
+	if after.Token != "abc123" {
+		t.Errorf("token = %q, want it preserved", after.Token)
+	}
+	// A new one replaces it.
+	if _, err := rg.update(e.ID, nil, nil, ptr("new-token")); err != nil {
+		t.Fatal(err)
+	}
+	if after, _ = rg.lookup(e.ID); after.Token != "new-token" {
+		t.Errorf("token = %q, want it replaced", after.Token)
+	}
+
+	// The input is validated the same way adding is.
+	bad := "http://100.64.0.10:18766/v1"
+	if _, err := rg.update(e.ID, nil, &bad, nil); err == nil {
+		t.Error("accepted a base_url with a /v1 suffix")
+	}
+	blank := "   "
+	if _, err := rg.update(e.ID, &blank, nil, nil); err == nil {
+		t.Error("accepted a blank name")
+	}
+	if _, err := rg.update("nope", &name, nil, nil); !errors.Is(err, errUnknownBackend) {
+		t.Errorf("unknown id: err = %v", err)
+	}
+	if _, err := rg.update("local", &name, nil, nil); !errors.Is(err, errLocalBackend) {
+		t.Errorf("local id: err = %v", err)
+	}
+
+	// Only the changed field is written, and it survives a reload.
+	reloaded := openRegistry(path)
+	got, ok := reloaded.lookup(e.ID)
+	if !ok {
+		t.Fatal("entry lost across reload")
+	}
+	if got.Name != name || got.BaseURL != next.BaseURL || got.Token != "new-token" {
+		t.Errorf("reloaded %+v", got)
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
+
 func TestBackendsViewNeverLeaksToken(t *testing.T) {
 	l := newLauncher()
 	l.clientOnly = true

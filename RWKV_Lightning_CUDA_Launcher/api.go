@@ -197,6 +197,7 @@ func (l *launcher) handler() http.Handler {
 		return nil
 	})
 	apiV1(mux, "POST /api/v1/backends", l.handleBackendsAdd)
+	apiV1(mux, "PATCH /api/v1/backends/{id}", l.handleBackendsUpdate)
 	apiV1(mux, "DELETE /api/v1/backends/{id}", l.handleBackendsDelete)
 	apiV1(mux, "POST /api/v1/backends/{id}/probe", l.handleBackendsProbe)
 	mux.HandleFunc("/api/v1/backends/{id}/{rest...}", l.handleForward)
@@ -478,6 +479,34 @@ func (l *launcher) handleBackendsAdd(w http.ResponseWriter, r *http.Request) err
 	if err != nil {
 		return err
 	}
+	l.backends.setProbe(e.ID, probeBackend(e.BaseURL, e.Token))
+	writeJSON(w, 200, l.backendView(e))
+	return nil
+}
+
+func (l *launcher) handleBackendsUpdate(w http.ResponseWriter, r *http.Request) error {
+	// Pointers, so "absent" and "set to empty" stay different things: an
+	// omitted field is left alone.
+	var req struct {
+		Name    *string `json:"name"`
+		BaseURL *string `json:"base_url"`
+		Token   *string `json:"token"`
+	}
+	if e := decode(w, r, &req); e != nil {
+		return e
+	}
+	e, err := l.backends.update(r.PathValue("id"), req.Name, req.BaseURL, req.Token)
+	switch {
+	case errors.Is(err, errUnknownBackend):
+		writeJSON(w, 404, map[string]any{"error": "unknown backend id"})
+		return nil
+	case errors.Is(err, errLocalBackend):
+		writeJSON(w, 400, map[string]any{"error": "the local node has no registry entry to edit"})
+		return nil
+	case err != nil:
+		return err
+	}
+	// A new address or token is a new thing to probe.
 	l.backends.setProbe(e.ID, probeBackend(e.BaseURL, e.Token))
 	writeJSON(w, 200, l.backendView(e))
 	return nil

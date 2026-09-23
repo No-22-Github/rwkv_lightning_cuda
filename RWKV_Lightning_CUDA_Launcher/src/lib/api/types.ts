@@ -46,6 +46,17 @@ export interface AddBackendRequest {
   token: string;
 }
 
+/**
+ * A partial update: omitted fields are left alone, and an empty `token` keeps
+ * the stored one — the console never receives a token, so it cannot mean
+ * "clear it".
+ */
+export interface UpdateBackendRequest {
+  name?: string;
+  base_url?: string;
+  token?: string;
+}
+
 export type ProcessState =
   | "offline"
   | "starting"

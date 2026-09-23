@@ -3,6 +3,7 @@ import {
   Boxes,
   Loader2,
   MoreHorizontal,
+  Pencil,
   Plus,
   RefreshCw,
   Server,
@@ -19,6 +20,7 @@ import {
 } from "@/components/node-status";
 import { NodeAvatar } from "@/app/node-card";
 import { NodeProcessList } from "@/components/node-processes";
+import { EditBackendDialog } from "@/components/edit-backend-dialog";
 import { PageHeader } from "@/components/common";
 import { Badge, StatusDot } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -371,6 +373,7 @@ function GpuRow({ gpu, owned }: { gpu: GpuMetric; owned: Set<number> }) {
 function NodeMenu({ backend }: { backend: BackendView }) {
   const { t } = useI18n();
   const [confirming, setConfirming] = useState(false);
+  const [editing, setEditing] = useState(false);
   return (
     <>
       <Popover>
@@ -385,6 +388,14 @@ function NodeMenu({ backend }: { backend: BackendView }) {
           </Button>
         </PopoverTrigger>
         <PopoverContent align="end" className="w-[240px] p-1.5">
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-[13px] transition-colors hover:bg-muted"
+          >
+            <Pencil className="size-3.5" />
+            {t("backend.edit")}
+          </button>
           <ProbeRow backend={backend} />
           <button
             type="button"
@@ -402,6 +413,11 @@ function NodeMenu({ backend }: { backend: BackendView }) {
           </button>
         </PopoverContent>
       </Popover>
+      <EditBackendDialog
+        backend={backend}
+        open={editing}
+        onOpenChange={setEditing}
+      />
       <RemoveDialog
         backend={backend}
         open={confirming}

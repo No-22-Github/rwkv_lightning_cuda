@@ -1,6 +1,7 @@
 import { clientRequest } from "./http";
 import type {
   AddBackendRequest,
+  UpdateBackendRequest,
   BackendListResponse,
   BackendView,
 } from "./types";
@@ -16,6 +17,13 @@ export const backendsApi = {
    */
   add: (body: AddBackendRequest) =>
     clientRequest<BackendView>("/api/v1/backends", { body }),
+
+  /** Edits what the caller sent and re-probes; the id survives. */
+  update: (id: string, body: UpdateBackendRequest) =>
+    clientRequest<BackendView>(
+      `/api/v1/backends/${encodeURIComponent(id)}`,
+      { method: "PATCH", body },
+    ),
 
   remove: (id: string) =>
     clientRequest<{ ok: boolean }>(

@@ -3,6 +3,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { backendsApi } from "@/lib/api/backends";
 import type {
   AddBackendRequest,
+  UpdateBackendRequest,
   BackendView,
   Capability,
 } from "@/lib/api/types";
@@ -18,6 +19,7 @@ interface BackendsState {
   refresh: (signal?: AbortSignal) => Promise<void>;
   select: (id: string) => void;
   add: (body: AddBackendRequest) => Promise<BackendView>;
+  update: (id: string, body: UpdateBackendRequest) => Promise<BackendView>;
   remove: (id: string) => Promise<void>;
   probe: (id: string) => Promise<BackendView>;
   probeAll: () => Promise<void>;
@@ -68,6 +70,14 @@ export const useBackends = create(
         set((s) => ({
           list: [...s.list.filter((b) => b.id !== view.id), view],
           currentId: view.id,
+        }));
+        return view;
+      },
+
+      update: async (id, body) => {
+        const view = await backendsApi.update(id, body);
+        set((s) => ({
+          list: s.list.map((b) => (b.id === view.id ? view : b)),
         }));
         return view;
       },

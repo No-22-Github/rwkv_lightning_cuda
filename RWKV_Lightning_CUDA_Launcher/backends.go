@@ -168,6 +168,52 @@ func (rg *registry) add(name, baseURL, token string) (backendEntry, error) {
 	return e, nil
 }
 
+// update changes the fields the caller sent and leaves the rest alone. The id
+// is random and survives an edit: renaming or re-addressing a node must not
+// move it out from under whatever the console has selected.
+func (rg *registry) update(id string, name, baseURL, token *string) (backendEntry, error) {
+	if id == "local" {
+		return backendEntry{}, errLocalBackend
+	}
+	rg.mu.Lock()
+	defer rg.mu.Unlock()
+	rg.ensureLoaded()
+	for i, e := range rg.entries {
+		if e.ID != id {
+			continue
+		}
+		next := e
+		if name != nil {
+			next.Name = strings.TrimSpace(*name)
+			if next.Name == "" {
+				return backendEntry{}, fmt.Errorf("name must not be empty")
+			}
+		}
+		if baseURL != nil {
+			parsed, err := validateBaseURL(*baseURL)
+			if err != nil {
+				return backendEntry{}, err
+			}
+			next.BaseURL = parsed
+		}
+		if token != nil {
+			// Empty means "leave the stored token alone": the console never
+			// receives it, so an untouched field cannot mean "clear it".
+			if trimmed := strings.TrimSpace(*token); trimmed != "" {
+				next.Token = trimmed
+			}
+		}
+		entries := append([]backendEntry{}, rg.entries...)
+		entries[i] = next
+		if err := rg.save(entries); err != nil {
+			return backendEntry{}, err
+		}
+		rg.entries = entries
+		return next, nil
+	}
+	return backendEntry{}, errUnknownBackend
+}
+
 func (rg *registry) remove(id string) error {
 	rg.mu.Lock()
 	defer rg.mu.Unlock()
