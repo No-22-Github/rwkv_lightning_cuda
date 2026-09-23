@@ -522,6 +522,56 @@ describe("GPU memory split", () => {
   });
 });
 
+describe("GPU model groups", () => {
+  it("names every model on a mixed box, largest group first", async () => {
+    const { gpuModelGroups, compactGpuName } = await import(
+      "../src/components/node-status"
+    );
+    const gpu = (index: number, name: string) => ({
+      index,
+      name,
+      memory_total_bytes: 1,
+      memory_used_bytes: 0,
+    });
+
+    // A uniform box is one group, name intact, vendor prefix gone.
+    expect(
+      gpuModelGroups([
+        gpu(0, "NVIDIA RTX PRO 6000 Blackwell Workstation Edition"),
+        gpu(1, "NVIDIA RTX PRO 6000 Blackwell Workstation Edition"),
+      ]),
+    ).toEqual([
+      { name: "RTX PRO 6000 Blackwell Workstation Edition", count: 2 },
+    ]);
+
+    // Mixed: one entry per model, bigger group first; ties by name, so the
+    // order does not depend on which card happens to be #0.
+    expect(
+      gpuModelGroups([
+        gpu(0, "NVIDIA RTX A6000"),
+        gpu(1, "NVIDIA RTX 4090"),
+        gpu(2, "NVIDIA RTX 4090"),
+      ]),
+    ).toEqual([
+      { name: "RTX 4090", count: 2 },
+      { name: "RTX A6000", count: 1 },
+    ]);
+    expect(
+      gpuModelGroups([gpu(0, "NVIDIA RTX A6000"), gpu(1, "NVIDIA RTX 4090")]),
+    ).toEqual([
+      { name: "RTX 4090", count: 1 },
+      { name: "RTX A6000", count: 1 },
+    ]);
+
+    // Other vendors: the prefix the driver writes is dropped and nothing
+    // else is touched.
+    expect(compactGpuName("AMD Radeon RX 7900 XTX")).toBe("Radeon RX 7900 XTX");
+    expect(compactGpuName("Intel Arc A770")).toBe("Arc A770");
+    expect(compactGpuName("")).toBe("");
+    expect(gpuModelGroups([gpu(0, "")])).toEqual([{ name: "", count: 1 }]);
+  });
+});
+
 describe("loaded model reporting", () => {
   it("does not present a configured path as a loaded model", async () => {
     const { modelName } = await import("../src/components/node-status");

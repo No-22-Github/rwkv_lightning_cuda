@@ -12,6 +12,7 @@ import {
 import {
   CapabilityBadges,
   GpuHeatGrid,
+  gpuModelGroups,
   memorySplit,
   modelName,
   ownedDevices,
@@ -292,10 +293,14 @@ function NodeDetail({ backend }: { backend: BackendView }) {
           <div className="flex items-baseline gap-2 px-2 pb-1 text-[11px] text-muted-foreground">
             {gpus.length > 0 && (
               <span className="truncate">
-                {t("nodes.gpuHeader", {
-                  count: gpus.length,
-                  name: gpus[0].name.replace(/^NVIDIA\s+/i, ""),
-                })}
+                {gpuModelGroups(gpus)
+                  .map(({ count, name }) =>
+                    t("nodes.gpuHeader", {
+                      count,
+                      name: name || t("nodes.gpuUnknown"),
+                    }),
+                  )
+                  .join(" · ")}
               </span>
             )}
           </div>

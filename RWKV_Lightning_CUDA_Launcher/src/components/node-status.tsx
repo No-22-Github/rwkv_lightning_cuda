@@ -17,9 +17,30 @@ type TFn = (key: MessageKey, vars?: Record<string, string | number>) => string;
  * The rail rows only have ~170px; NVML reports "NVIDIA RTX … Workstation
  * Edition" in full. Drop the vendor prefix — every card on a box shares it —
  * and let truncate handle the rest.
+ *
+ * The list is deliberately short and literal: it removes a prefix the vendor
+ * itself writes, and nothing else. Inventing model names for cards we cannot
+ * test would be worse than leaving them as the driver reported them.
  */
 export function compactGpuName(name: string) {
-  return name.replace(/^NVIDIA\s+/i, "");
+  return name.replace(/^(NVIDIA|AMD|Advanced Micro Devices,?|Intel)\s+/i, "").trim();
+}
+
+/**
+ * A box's cards grouped by model. Normally one group, and the header is just
+ * "8 × RTX PRO 6000 …". A mixed box names every model with its count, largest
+ * group first, instead of reporting whatever card #0 happens to be as if the
+ * whole box were that.
+ */
+export function gpuModelGroups(gpus: GpuMetric[]) {
+  const counts = new Map<string, number>();
+  for (const gpu of gpus) {
+    const model = compactGpuName(gpu.name);
+    counts.set(model, (counts.get(model) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
 }
 
 /**
