@@ -86,6 +86,21 @@ export function runtimeHint(t: TFn, runtime?: RuntimeState) {
 }
 
 /**
+ * Runtime status line under the switcher card. Mockup semantics: a bare
+ * inference node is "inference only" (n/a), not offline; only a failed probe
+ * reads as unreachable.
+ */
+export function runtimeStatus(
+  reachable: boolean,
+  kind: string,
+  status: string | undefined,
+): { tone: StatusTone; key: "unreachable" | "inferenceOnly" | "runtime" } {
+  if (!reachable) return { tone: "bad", key: "unreachable" };
+  if (kind === "inference_only") return { tone: "info", key: "inferenceOnly" };
+  return { tone: status === "ready" ? "ok" : "idle", key: "runtime" };
+}
+
+/**
  * Overall node tone used by the rail dot and the node cards. Reachable but
  * not serving is "warn", never "idle": a grey dot next to a live node reads
  * as "no information", which is exactly the state a console exists to
@@ -266,6 +281,46 @@ export function GpuMiniRows({ metrics }: { metrics: MetricsResponse }) {
       })}
     </div>
   );
+}
+
+/**
+ * One cell per GPU, four to a row, so an eight-card box reads as a 2×4 heat
+ * grid. The colour is utilization — an idle card stays grey, because a green
+ * square for 0% reads as "working" — and the numbers behind each cell (index,
+ * utilization, memory) are in its tooltip, so the block never has to be
+ * guessed at.
+ *
+ * The same block is the rail card's overview when the rail is open and its
+ * only remaining GPU readout when it is collapsed, so its geometry is fixed:
+ * cell size, column count and gap must not depend on the rail width.
+ */
+export function GpuHeatGrid({ gpus }: { gpus: GpuMetric[] }) {
+  if (gpus.length === 0) return null;
+  return (
+    <span className="grid shrink-0 grid-cols-4 gap-px">
+      {gpus.map((gpu) => (
+        <span
+          key={gpu.index}
+          title={`#${gpu.index} · ${
+            gpu.utilization_percent !== undefined
+              ? `${gpu.utilization_percent}%`
+              : "—"
+          } · ${formatGigabytePair(gpu.memory_used_bytes, gpu.memory_total_bytes)}`}
+          className={cn(
+            "size-[5px] rounded-[1px]",
+            heatTone(gpu.utilization_percent),
+          )}
+        />
+      ))}
+    </span>
+  );
+}
+
+/** Three tiers on the same 85% line the GPU cards use. */
+function heatTone(utilization?: number) {
+  if (utilization === undefined) return "bg-muted-foreground/20";
+  if (utilization > 85) return "bg-warning";
+  return utilization <= 5 ? "bg-muted-foreground/40" : "bg-success";
 }
 
 /**

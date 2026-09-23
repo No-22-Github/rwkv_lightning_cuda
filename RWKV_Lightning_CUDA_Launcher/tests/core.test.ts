@@ -468,7 +468,7 @@ describe("GPU memory formatting", () => {
   it("spells the unit once so the rail row fits on one line", async () => {
     const { formatGigabytePair } = await import("../src/lib/format");
     const GiB = 1024 ** 3;
-    // The 216px rail card leaves ~158px for this row plus the temp/power
+    // The 216px rail card leaves ~162px for this row plus the temp/power
     // pair; "61.5 GB / 95.6 GB" overflowed it and wrapped both halves.
     expect(formatGigabytePair(61.5 * GiB, 95.6 * GiB)).toBe("61.5 / 95.6 GB");
     expect(formatGigabytePair(0.6 * GiB, 95.6 * GiB)).toBe("0.6 / 95.6 GB");

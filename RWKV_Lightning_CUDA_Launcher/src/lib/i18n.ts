@@ -63,6 +63,8 @@ const zh = {
   // 聚合读数，明细留给悬浮卡片。
   "rail.gpuSummary": "{count} 张 GPU · 平均利用率 {avg}%",
   "rail.gpuSummaryOne": "GPU 利用率 {avg}%",
+  // 卡片里的热力格已经按卡数排格子，这一行只需要补上格子里读不出的平均值。
+  "rail.gpuAverage": "平均利用率 {avg}%",
 
   "backend.local": "本机",
   "backend.registered": "已注册后端",
@@ -567,6 +569,7 @@ const en: Record<MessageKey, string> = {
   "header.expandSidebar": "Expand sidebar",
   "rail.gpuSummary": "{count} GPUs · {avg}% average utilization",
   "rail.gpuSummaryOne": "GPU utilization {avg}%",
+  "rail.gpuAverage": "GPU average {avg}%",
 
   "backend.local": "This machine",
   "backend.registered": "REGISTERED BACKENDS",
