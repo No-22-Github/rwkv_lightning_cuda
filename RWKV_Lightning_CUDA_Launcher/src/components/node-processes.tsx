@@ -152,6 +152,12 @@ function ProcessActions({ row }: { row: ProcessRow }) {
 
   const nodes = () => useNodes.getState();
   return (
+    // Right-packed, in the order start / restart / stop / logs. The rows offer
+    // different sets of actions, and packing to the trailing edge lines a
+    // button up by its distance from that edge — so the actions every process
+    // shares (stop, logs) sit under their twins, and only the two that the
+    // runtime alone offers are ever missing, at the left where the gap reads
+    // as "not applicable here" rather than a hole between buttons.
     <span className="flex shrink-0 items-center gap-0.5">
       {row.startable && (
         <Button
@@ -174,24 +180,6 @@ function ProcessActions({ row }: { row: ProcessRow }) {
           <Play className="size-3.5" />
         </Button>
       )}
-      <Button
-        size="icon"
-        variant="ghost"
-        title={t("common.stop")}
-        aria-label={t("common.stop")}
-        disabled={row.stopDisabled}
-        onClick={() =>
-          void run(
-            () =>
-              row.key === "runtime"
-                ? nodes().stopRuntime(backendId)
-                : nodes().stopJob(backendId, row.key),
-            t("runtime.stopped"),
-          )
-        }
-      >
-        <Square className="size-3.5" />
-      </Button>
       {row.startable && (
         <Button
           size="icon"
@@ -212,15 +200,30 @@ function ProcessActions({ row }: { row: ProcessRow }) {
       <Button
         size="icon"
         variant="ghost"
+        title={t("common.stop")}
+        aria-label={t("common.stop")}
+        disabled={row.stopDisabled}
+        onClick={() =>
+          void run(
+            () =>
+              row.key === "runtime"
+                ? nodes().stopRuntime(backendId)
+                : nodes().stopJob(backendId, row.key),
+            t("runtime.stopped"),
+          )
+        }
+      >
+        <Square className="size-3.5" />
+      </Button>
+      <Button
+        size="icon"
+        variant="ghost"
         title={t("logs.open")}
         aria-label={t("logs.open")}
         onClick={() => show(row.key)}
       >
         <ScrollText className="size-3.5" />
       </Button>
-      {/* Packed to the trailing edge rather than into fixed columns: the
-          rows offer different actions, and a column per action left holes in
-          the middle of the shorter rows. */}
     </span>
   );
 }
