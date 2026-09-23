@@ -10,7 +10,7 @@ import {
   runtimeLabel,
   runtimeStatus,
 } from "@/components/node-status";
-import { StatusDot, StatusPill, type StatusTone } from "@/components/ui/badge";
+import { StatusDot, StatusPill } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -18,7 +18,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { formatRelativeTime } from "@/lib/format";
+import { formatGigabytePair, formatRelativeTime } from "@/lib/format";
 import { useI18n, type MessageKey } from "@/lib/i18n";
 import type { BackendView, MetricsResponse } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
@@ -50,7 +50,6 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
   const openAddBackend = useUI((s) => s.openAddBackend);
   const setCollapsed = useRail((s) => s.setCollapsed);
 
-  const tone = nodeTone(backend, runtime);
   const status = backend
     ? runtimeStatus(backend.reachable, backend.kind, runtime?.status)
     : undefined;
@@ -79,16 +78,30 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
           gpus.length,
       )
     : 0;
-  // The grid already counts the cards, so this line only has to add the
-  // average — the one number a per-card colour cannot show. The older
-  // "{count} GPUs · {avg}% average utilization" wording ran past the card's
-  // 176px and truncated the percentage it existed to report.
+  const usedBytes = gpus.reduce(
+    (sum, gpu) => sum + (gpu.memory_used_bytes ?? 0),
+    0,
+  );
+  const totalBytes = gpus.reduce(
+    (sum, gpu) => sum + (gpu.memory_total_bytes ?? 0),
+    0,
+  );
+  // The grid already counts the cards, so these lines only have to add what a
+  // per-card colour cannot show: the average, and the whole box's memory.
+  // Whole gigabytes: eight cards summed to one decimal each is noise, and
+  // "86 / 765 GB" is the reading that fits the rail.
   const gpuSummary =
     gpus.length > 1
       ? t("rail.gpuAverage", { avg: average })
       : gpus.length === 1
         ? t("rail.gpuSummaryOne", { avg: average })
         : gpuUnavailableReason(t, metrics, metricsError, backend);
+  const memoryLine =
+    totalBytes > 0
+      ? t("rail.gpuMemory", {
+          pair: formatGigabytePair(usedBytes, totalBytes, 0),
+        })
+      : "";
 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-background">
@@ -105,7 +118,7 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
             aria-haspopup="dialog"
           >
             <span className="flex items-center gap-2">
-              <NodeAvatar name={backend?.name} tone={tone} />
+              <NodeAvatar name={backend?.name} />
               <span
                 className={cn(
                   "min-w-0 flex-1 truncate text-[13px] font-semibold tracking-[-0.01em] transition-opacity",
@@ -122,19 +135,47 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
               />
             </span>
 
-            {/* Avatar above, heat grid below, the same two rows in both
-                states: the avatar tile and the grid are the same width, so
-                the collapsed card reads as one glyph rather than a tile with
-                a wider bar under it. */}
-            <span className="mt-2 flex items-center gap-2">
-              <GpuHeatGrid gpus={gpus} />
-              <span
-                className={cn(
-                  "min-w-0 flex-1 truncate font-mono text-[10.5px] text-muted-foreground transition-opacity",
-                  collapsed && "opacity-0",
+            {/* Avatar above, heat block below, the same two rows in both
+                states. The status dot sits under the block rather than on the
+                avatar's corner: it is the one place a 44px card has room for
+                it, and the words next to it only fit while the rail is open.
+                Both are centred on the 16px column the avatar sets up. */}
+            <span className="mt-2 flex items-start gap-2">
+              <span className="flex w-4 shrink-0 flex-col items-center gap-1.5">
+                {gpus.length > 0 ? (
+                  <GpuHeatGrid gpus={gpus} />
+                ) : (
+                  // Keeps the status dot at the same height on a node whose
+                  // metrics have not arrived yet.
+                  <span className="h-[34px]" />
                 )}
-              >
-                {gpuSummary}
+                {status && <StatusDot tone={status.tone} />}
+              </span>
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span
+                  className={cn(
+                    "truncate font-mono text-[10.5px] text-muted-foreground transition-opacity",
+                    collapsed && "opacity-0",
+                  )}
+                >
+                  {gpuSummary}
+                </span>
+                <span
+                  className={cn(
+                    "truncate font-mono text-[10.5px] text-muted-foreground transition-opacity",
+                    collapsed && "opacity-0",
+                  )}
+                >
+                  {memoryLine}
+                </span>
+                <span
+                  className={cn(
+                    "truncate text-[11.5px] text-muted-foreground transition-opacity",
+                    collapsed && "opacity-0",
+                  )}
+                >
+                  {statusLabel}
+                </span>
               </span>
             </span>
           </button>
@@ -151,7 +192,7 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
           <div className="mb-1 rounded-lg border border-border bg-background">
             <div className="px-2.5 pt-2.5 pb-2">
               <div className="flex items-center gap-2">
-                <NodeAvatar name={backend?.name} tone={tone} />
+                <NodeAvatar name={backend?.name} />
                 <span className="min-w-0 flex-1 truncate text-[13px] font-semibold tracking-[-0.01em]">
                   {backend?.name ?? t("backend.emptyTitle")}
                 </span>
@@ -252,23 +293,17 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
 
 /**
  * The node's identity in one glyph: its initial in a tile, sized like the nav
- * icons above so the rail reads as a single icon column, with the node's tone
- * as the corner badge those icons use for their own badges.
+ * icons above. The tile carries no status badge of its own — the card's
+ * status dot has the words next to it, and the popover's pill repeats it.
  */
-function NodeAvatar({ name, tone }: { name?: string; tone: StatusTone }) {
+function NodeAvatar({ name }: { name?: string }) {
   return (
-    <span className="relative shrink-0">
-      <span className="flex size-4 items-center justify-center rounded-[5px] bg-muted text-[9.5px] font-semibold text-muted-foreground">
-        {name ? (
-          name.trim().slice(0, 1).toUpperCase()
-        ) : (
-          <Server className="size-2.5" />
-        )}
-      </span>
-      <StatusDot
-        tone={tone}
-        className="absolute -top-1 -right-1 ring-2 ring-background"
-      />
+    <span className="flex size-4 shrink-0 items-center justify-center rounded-[5px] bg-muted text-[9.5px] font-semibold text-muted-foreground">
+      {name ? (
+        name.trim().slice(0, 1).toUpperCase()
+      ) : (
+        <Server className="size-2.5" />
+      )}
     </span>
   );
 }

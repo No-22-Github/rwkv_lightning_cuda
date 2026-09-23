@@ -286,9 +286,9 @@ export function GpuMiniRows({ metrics }: { metrics: MetricsResponse }) {
 /**
  * One cell per GPU, two to a row, so an eight-card box reads as a 2×4 heat
  * grid. The colour is utilization — an idle card stays grey, because a green
- * square for 0% reads as "working" — and the numbers behind each cell (index,
- * utilization, memory) are in its tooltip, so the block never has to be
- * guessed at.
+ * square for 0% reads as "working" — and the tooltip carries the whole row
+ * the compact list used to spell out, so hovering a cell gives the same
+ * reading whether the rail is open or collapsed.
  *
  * Two columns, not four: the block has to be exactly as wide as the node
  * avatar above it in the rail card. Matching widths is what makes the
@@ -300,24 +300,36 @@ export function GpuMiniRows({ metrics }: { metrics: MetricsResponse }) {
  */
 export function GpuHeatGrid({ gpus }: { gpus: GpuMetric[] }) {
   if (gpus.length === 0) return null;
+  const alone = gpus.length === 1;
   return (
-    <span className="grid shrink-0 grid-cols-2 gap-0.5">
+    <span className="grid shrink-0 grid-cols-2 auto-rows-[7px] gap-0.5">
       {gpus.map((gpu) => (
         <span
           key={gpu.index}
-          title={`#${gpu.index} · ${
-            gpu.utilization_percent !== undefined
-              ? `${gpu.utilization_percent}%`
-              : "—"
-          } · ${formatGigabytePair(gpu.memory_used_bytes, gpu.memory_total_bytes)}`}
+          title={gpuRowTitle(gpu)}
           className={cn(
-            "size-[7px] rounded-[2px]",
+            "rounded-[2px]",
+            // A single card would otherwise be one 7px fleck in the corner of
+            // the block: let it fill the block, so a one-GPU node reads as a
+            // gauge rather than a stray square.
+            alone ? "col-span-2 row-span-4 w-4" : "size-[7px]",
             heatTone(gpu.utilization_percent),
           )}
         />
       ))}
     </span>
   );
+}
+
+/** The per-GPU line the compact rows used to spell out, as a cell tooltip. */
+function gpuRowTitle(gpu: GpuMetric) {
+  return [
+    `#${gpu.index} ${compactGpuName(gpu.name)}`.trim(),
+    gpu.utilization_percent !== undefined ? `${gpu.utilization_percent}%` : "—",
+    formatGigabytePair(gpu.memory_used_bytes, gpu.memory_total_bytes),
+    gpu.temperature_c !== undefined ? `${gpu.temperature_c}°C` : "—",
+    gpu.power_watts !== undefined ? `${gpu.power_watts}W` : "—",
+  ].join(" · ");
 }
 
 /** Three tiers on the same 85% line the GPU cards use. */
