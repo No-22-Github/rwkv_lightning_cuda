@@ -5,7 +5,10 @@ export function Card({ className, ...props }: ComponentProps<"section">) {
   return (
     <section
       className={cn(
-        "rounded-xl border border-border bg-card shadow-flat",
+        // overflow-hidden: a child with its own background (a footer strip,
+        // say) paints its square corners over the card's rounded ones. Nothing
+        // inside a card needs to escape it — popovers and dialogs portal out.
+        "overflow-hidden rounded-xl border border-border bg-card shadow-flat",
         className,
       )}
       {...props}
