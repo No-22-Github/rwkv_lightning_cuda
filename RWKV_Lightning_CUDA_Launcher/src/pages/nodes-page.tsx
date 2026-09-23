@@ -280,7 +280,7 @@ function NodeDetail({ backend }: { backend: BackendView }) {
         <NodeMenu backend={backend} />
       </CardHeader>
 
-      <CardContent className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
+      <CardContent className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
         {/* Services: the three long-lived processes and their four actions,
             each action in its own column. */}
         <NodeProcessList columns className="p-0" />
@@ -288,7 +288,7 @@ function NodeDetail({ backend }: { backend: BackendView }) {
         {/* A container, not a viewport breakpoint: what the card rows need is
             the width of this column, and that depends on the panel's own
             layout, not on the window. */}
-        <div className="@container min-w-0">
+        <div className="@container min-w-0 lg:border-l lg:border-border lg:pl-4">
           <div className="flex items-baseline gap-2 px-2 pb-1 text-[11px] text-muted-foreground">
             {gpus.length > 0 && (
               <span className="truncate">
@@ -305,7 +305,7 @@ function NodeDetail({ backend }: { backend: BackendView }) {
             // keeps the full width, and a narrow column falls back to one.
             <div
               className={cn(
-                "grid gap-x-4 gap-y-0.5",
+                "grid gap-x-3 gap-y-0.5",
                 gpus.length > 1 && "@min-[30rem]:grid-cols-2",
               )}
             >

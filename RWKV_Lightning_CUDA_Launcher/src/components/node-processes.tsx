@@ -299,7 +299,7 @@ export function NodeProcessList({
         // rounded edge. minmax(0,1fr) is the column that gives way.
         <div
           key={row.key}
-          className="grid grid-cols-[7px_minmax(0,1fr)_auto] items-center gap-x-2.5 rounded-lg px-2 py-1.5"
+          className="grid grid-cols-[7px_minmax(0,1fr)_auto] items-center gap-x-2 rounded-lg px-2 py-1.5"
           title={row.startable ? undefined : t("process.jobPage")}
         >
           <StatusDot tone={row.tone} />
@@ -308,7 +308,7 @@ export function NodeProcessList({
                 and centred against it. The row already carries a detail line
                 below, and a second stacked line here only made the card
                 busier. */}
-            <span className="flex items-center gap-2">
+            <span className="flex items-center gap-1.5">
               <span className="shrink-0 text-[12.5px] font-medium">
                 {t(row.label)}
               </span>
