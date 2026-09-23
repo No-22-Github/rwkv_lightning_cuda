@@ -267,17 +267,16 @@ export function NodeProcessList({ className }: { className?: string }) {
         >
           <StatusDot tone={row.tone} />
           <span className="block min-w-0">
-            <span className="flex items-baseline gap-2">
-              {/* A floor under the label, not a fixed width: "推理 / 训练 /
-                  量化" are equal in Chinese, but "Inference / Training /
-                  Quantization" are not, and without it the state word starts
-                  at three different x. */}
-              <span className="min-w-21 shrink-0 text-[12.5px] font-medium">
-                {t(row.label)}
-              </span>
-              <span className="min-w-0 truncate text-[11px] text-muted-foreground">
-                {row.state}
-              </span>
+            <span className="block truncate text-[12.5px] font-medium">
+              {t(row.label)}
+            </span>
+            {/* The state is this row's subtitle, left-aligned under the name —
+                the same shape the rail's node card gives its service state.
+                Stacking it also means the three rows line up whatever the
+                labels measure, which a fixed label column could only
+                approximate. */}
+            <span className="block truncate text-[11px] text-muted-foreground">
+              {row.state}
             </span>
             {row.detail && (
               <span className="block truncate font-mono text-[10.5px] text-muted-foreground/80">
