@@ -29,13 +29,16 @@ import { useRail, useUI } from "@/stores/ui";
 type TFn = (key: MessageKey, vars?: Record<string, string | number>) => string;
 
 /**
- * Bottom-of-rail node card. The rail renders this component in both states
- * instead of swapping in a collapsed variant: closing the rail narrows this
- * card and clips its right side, so the avatar and the heat grid keep the
- * exact position they have while it is open. The rows below the heat grid
- * are the exception — they are dropped, not clipped sideways, which is what
- * makes the collapse read as "the detail went away" rather than "the card
- * became something else".
+ * Bottom-of-rail node card: one card at two rail widths.
+ *
+ * It holds exactly two rows in both states — the node avatar and the GPU heat
+ * grid under it — because it hangs off the rail's bottom edge. A row that
+ * appeared or disappeared with the collapse would push the settings row and
+ * the card itself up and down again, which is the jump this card used to
+ * have. Everything that does not fit at 44px wide, held or not — the URL, the
+ * kind and runtime chips, the per-GPU rows, the process rows and the node
+ * switcher — is in the popover, and the popover is the same one in both
+ * states.
  */
 export function NodeCard({ collapsed }: { collapsed: boolean }) {
   const { t } = useI18n();
@@ -91,12 +94,13 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
     <div className="overflow-hidden rounded-xl border border-border bg-background">
       <Popover>
         <PopoverTrigger asChild>
-          {/* 9px of padding plus the card's 1px border puts this content on
-              the same 20px column as every nav icon above it. */}
+          {/* 13px of padding plus the card's 1px border centres this 16px
+              column in the collapsed card, which is also the 24px icon column
+              every nav icon above it sits on. */}
           <button
             type="button"
             title={hint}
-            className="block w-full px-[9px] py-2.5 text-left transition-colors hover:bg-muted"
+            className="block w-full overflow-hidden px-[13px] py-2.5 text-left transition-colors hover:bg-muted"
             aria-label={t("backend.registered")}
             aria-haspopup="dialog"
           >
@@ -118,17 +122,10 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
               />
             </span>
 
-            <span
-              className={cn(
-                "mt-1.5 block truncate font-mono text-[10.5px] text-muted-foreground transition-opacity",
-                collapsed && "opacity-0",
-              )}
-            >
-              {backend?.base_url ?? "—"}
-            </span>
-
-            {/* The one block both rail states keep, so it is also the one
-                block whose position must not depend on the rail width. */}
+            {/* Avatar above, heat grid below, the same two rows in both
+                states: the avatar tile and the grid are the same width, so
+                the collapsed card reads as one glyph rather than a tile with
+                a wider bar under it. */}
             <span className="mt-2 flex items-center gap-2">
               <GpuHeatGrid gpus={gpus} />
               <span
@@ -140,9 +137,29 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
                 {gpuSummary}
               </span>
             </span>
+          </button>
+        </PopoverTrigger>
 
-            {!collapsed && (
-              <span className="mt-2 flex items-center gap-2">
+        <PopoverContent
+          side={collapsed ? "right" : "top"}
+          align="start"
+          className="w-[320px] p-1.5"
+        >
+          {/* The card is two rows wide, so this is where the node's details
+              live in both states: the same pills, the same rows and the same
+              process list the card is built from. */}
+          <div className="mb-1 rounded-lg border border-border bg-background">
+            <div className="px-2.5 pt-2.5 pb-2">
+              <div className="flex items-center gap-2">
+                <NodeAvatar name={backend?.name} tone={tone} />
+                <span className="min-w-0 flex-1 truncate text-[13px] font-semibold tracking-[-0.01em]">
+                  {backend?.name ?? t("backend.emptyTitle")}
+                </span>
+              </div>
+              <p className="mt-1.5 truncate font-mono text-[10.5px] text-muted-foreground">
+                {backend?.base_url ?? "—"}
+              </p>
+              <div className="mt-1.5 flex items-center gap-2">
                 <span className="inline-flex h-[18px] items-center rounded-md bg-muted px-1.5 text-[10px] text-muted-foreground">
                   {kindLabel}
                 </span>
@@ -153,59 +170,22 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
                     className="min-w-0"
                   />
                 )}
-              </span>
-            )}
-          </button>
-        </PopoverTrigger>
-
-        <PopoverContent
-          side={collapsed ? "right" : "top"}
-          align="start"
-          className="w-[320px] p-1.5"
-        >
-          {/* Collapsed, the rail shows the avatar and nothing else, so the
-              popover is where the rest of the card lives. It reuses the same
-              rows, pills and list the open card is built from. */}
-          {collapsed && (
-            <div className="mb-1 rounded-lg border border-border bg-background">
-              <div className="px-2.5 pt-2.5 pb-2">
-                <div className="flex items-center gap-2">
-                  <NodeAvatar name={backend?.name} tone={tone} />
-                  <span className="min-w-0 flex-1 truncate text-[13px] font-semibold tracking-[-0.01em]">
-                    {backend?.name ?? t("backend.emptyTitle")}
-                  </span>
-                </div>
-                <p className="mt-1.5 truncate font-mono text-[10.5px] text-muted-foreground">
-                  {backend?.base_url ?? "—"}
-                </p>
-                <div className="mt-1.5 flex items-center gap-2">
-                  <span className="inline-flex h-[18px] items-center rounded-md bg-muted px-1.5 text-[10px] text-muted-foreground">
-                    {kindLabel}
-                  </span>
-                  {status && (
-                    <StatusPill
-                      tone={status.tone}
-                      label={statusLabel}
-                      className="min-w-0"
-                    />
-                  )}
-                </div>
-              </div>
-              <GpuRows
-                metrics={metrics}
-                metricsError={metricsError}
-                backend={backend}
-                t={t}
-                className="max-h-[248px] overflow-x-hidden overflow-y-auto border-t border-border px-2.5 py-2.5"
-              />
-              {/* The same three process rows the header menu shows: one
-                  implementation of "start this / stop that", wherever it is
-                  reached from. */}
-              <div className="border-t border-border">
-                <NodeProcessList />
               </div>
             </div>
-          )}
+            <GpuRows
+              metrics={metrics}
+              metricsError={metricsError}
+              backend={backend}
+              t={t}
+              className="max-h-[248px] overflow-x-hidden overflow-y-auto border-t border-border px-2.5 py-2.5"
+            />
+            {/* The same three process rows the header menu shows: one
+                implementation of "start this / stop that", wherever it is
+                reached from. */}
+            <div className="border-t border-border">
+              <NodeProcessList />
+            </div>
+          </div>
 
           <p className="px-2 py-1.5 text-[11px] font-semibold tracking-[0.04em] text-muted-foreground">
             {t("backend.registered")}
@@ -266,18 +246,6 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
           )}
         </PopoverContent>
       </Popover>
-
-      {/* Below everything the two states share, so dropping it cannot move
-          the avatar or the heat grid. */}
-      {!collapsed && (
-        <GpuRows
-          metrics={metrics}
-          metricsError={metricsError}
-          backend={backend}
-          t={t}
-          className="max-h-[172px] overflow-x-hidden overflow-y-auto border-t border-border px-[9px] py-2.5"
-        />
-      )}
     </div>
   );
 }

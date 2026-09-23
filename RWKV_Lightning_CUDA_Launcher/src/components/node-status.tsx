@@ -284,20 +284,24 @@ export function GpuMiniRows({ metrics }: { metrics: MetricsResponse }) {
 }
 
 /**
- * One cell per GPU, four to a row, so an eight-card box reads as a 2×4 heat
+ * One cell per GPU, two to a row, so an eight-card box reads as a 2×4 heat
  * grid. The colour is utilization — an idle card stays grey, because a green
  * square for 0% reads as "working" — and the numbers behind each cell (index,
  * utilization, memory) are in its tooltip, so the block never has to be
  * guessed at.
  *
- * The same block is the rail card's overview when the rail is open and its
- * only remaining GPU readout when it is collapsed, so its geometry is fixed:
- * cell size, column count and gap must not depend on the rail width.
+ * Two columns, not four: the block has to be exactly as wide as the node
+ * avatar above it in the rail card. Matching widths is what makes the
+ * collapsed card read as one centred badge instead of a tile with a wider bar
+ * under it, and it costs nothing — the same eight cells, larger.
+ *
+ * The geometry is fixed on purpose: the rail card keeps this block in both
+ * states, so cell size, column count and gap must not depend on rail width.
  */
 export function GpuHeatGrid({ gpus }: { gpus: GpuMetric[] }) {
   if (gpus.length === 0) return null;
   return (
-    <span className="grid shrink-0 grid-cols-4 gap-px">
+    <span className="grid shrink-0 grid-cols-2 gap-0.5">
       {gpus.map((gpu) => (
         <span
           key={gpu.index}
@@ -307,7 +311,7 @@ export function GpuHeatGrid({ gpus }: { gpus: GpuMetric[] }) {
               : "—"
           } · ${formatGigabytePair(gpu.memory_used_bytes, gpu.memory_total_bytes)}`}
           className={cn(
-            "size-[5px] rounded-[1px]",
+            "size-[7px] rounded-[2px]",
             heatTone(gpu.utilization_percent),
           )}
         />

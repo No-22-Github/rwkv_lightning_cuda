@@ -48,17 +48,18 @@ const SECTIONS: { title: MessageKey; items: NavItem[] }[] = [
   },
 ];
 
-/** The rail's two widths. Icons sit at 20px from the rail's edge in both. */
+/** The rail's two widths. Icons sit at 24px — centred — in both. */
 const RAIL_WIDTH = { open: "w-[216px]", closed: "w-16" } as const;
 
 /**
  * The rail is one layout at two widths: collapsing narrows the aside and
  * clips the overflow, rather than switching to a centred, icon-only variant.
- * Ten px of rail padding plus ten of row padding is what fixes the icon
- * column at 20px; every state change goes through width, so nothing in that
- * column moves — no `justify-content: center` in the collapsed state, which
- * is what shifts icons by a few px and reads as "jitter" as the width
- * animates.
+ * Ten px of rail padding plus fourteen of row padding fixes the icon column
+ * at 24px — a 16px glyph centred in the 64px collapsed rail — and every state
+ * change goes through width, so nothing in that column moves. No
+ * `justify-content: center` in the collapsed state either: changing the
+ * centring basis is what shifts icons by a few px and reads as "jitter" as
+ * the width animates.
  */
 export function Rail() {
   const { t } = useI18n();
@@ -137,7 +138,7 @@ function SectionTitle({
   collapsed: boolean;
 }) {
   return (
-    <div className="shrink-0 px-2.5 pt-3.5 pb-1">
+    <div className="shrink-0 pr-2.5 pt-3.5 pb-1 pl-[14px]">
       <div className="relative">
         <span
           className={cn(
@@ -183,7 +184,7 @@ function NavButton({
         // node card grows, which changes each row's height between the two
         // rail states. The nav scrolls instead — that is what the scrolling
         // container above it is for.
-        "flex shrink-0 items-center gap-2.5 overflow-hidden rounded-lg py-2 pr-2.5 pl-2.5 text-left text-[13px] font-medium transition-colors",
+        "flex shrink-0 items-center gap-2.5 overflow-hidden rounded-lg py-2 pr-2.5 pl-[14px] text-left text-[13px] font-medium transition-colors",
         active ? "bg-accent text-foreground" : "text-foreground hover:bg-muted",
       )}
     >
