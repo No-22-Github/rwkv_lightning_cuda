@@ -83,7 +83,7 @@ func (l *launcher) handler() http.Handler {
 		if !l.agentGate(w) {
 			return nil
 		}
-		writeJSON(w, 200, sampleMetrics())
+		writeJSON(w, 200, sampleMetrics(l.runtime.pid()))
 		return nil
 	})
 	apiV1(mux, "POST /api/v1/node/fs", l.handleNodeFS)

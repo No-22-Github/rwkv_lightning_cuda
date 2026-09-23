@@ -19,7 +19,10 @@ export function PopoverContent({
         align={align}
         sideOffset={sideOffset}
         className={cn(
-          "z-70 overflow-hidden rounded-xl border border-border bg-card shadow-[0_16px_40px_rgba(0,0,0,0.4)] outline-none",
+          // A soft shadow: the border carries the edge, the shadow only lifts
+          // the panel off the page. At 16px/40px/0.4 it read as floating well
+          // above everything else.
+          "z-70 overflow-hidden rounded-xl border border-border bg-card shadow-[0_8px_24px_rgba(0,0,0,0.14)] outline-none",
           "data-[state=open]:animate-fade-in",
           className,
         )}

@@ -482,6 +482,46 @@ describe("GPU memory formatting", () => {
   });
 });
 
+describe("GPU memory split", () => {
+  it("draws ours and everyone else's along the memory axis", async () => {
+    const { memorySplit } = await import("../src/components/node-status");
+    const GiB = 1024 ** 3;
+    const gpu = (own?: number) => ({
+      index: 0,
+      name: "NVIDIA RTX PRO 6000",
+      memory_total_bytes: 100 * GiB,
+      memory_used_bytes: 60 * GiB,
+      ...(own === undefined ? {} : { own_memory_bytes: own }),
+    });
+
+    // The agent attributed the memory: both owners get their segment.
+    expect(memorySplit(gpu(20 * GiB), new Set())).toEqual({
+      used: 60,
+      own: 20,
+      foreign: 40,
+    });
+    // No attribution and the card is the runtime's: all of it is ours.
+    expect(memorySplit(gpu(), new Set([0]))).toEqual({
+      used: 60,
+      own: 60,
+      foreign: 0,
+    });
+    // No attribution and no runtime holding it: none of it is ours, which is
+    // the state a box with the service stopped is always in.
+    expect(memorySplit(gpu(), new Set())).toEqual({
+      used: 60,
+      own: 0,
+      foreign: 60,
+    });
+    // An over-reported own figure is clamped to what the card says is used.
+    expect(memorySplit(gpu(90 * GiB), new Set())).toEqual({
+      used: 60,
+      own: 60,
+      foreign: 0,
+    });
+  });
+});
+
 describe("loaded model reporting", () => {
   it("does not present a configured path as a loaded model", async () => {
     const { modelName } = await import("../src/components/node-status");

@@ -1,7 +1,7 @@
 import { Cpu } from "lucide-react";
 import { Badge, type StatusTone } from "@/components/ui/badge";
 import { Notice } from "@/components/ui/primitives";
-import { formatGigabytePair, percent } from "@/lib/format";
+import { formatGigabytePair } from "@/lib/format";
 import type { MessageKey } from "@/lib/i18n";
 import type {
   BackendView,
@@ -188,7 +188,6 @@ export function GpuCard({
   gpu: GpuMetric;
   owned: Set<number>;
 }) {
-  const used = percent(gpu.memory_used_bytes, gpu.memory_total_bytes);
   const utilization = gpu.utilization_percent;
   return (
     <div
@@ -211,12 +210,7 @@ export function GpuCard({
           {utilization !== undefined ? `${utilization}%` : "—"}
         </span>
       </div>
-      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
-        <div
-          className={cn("h-full rounded-full", memoryBar(gpu, owned))}
-          style={{ width: `${used}%` }}
-        />
-      </div>
+      <MemoryBar gpu={gpu} owned={owned} thick />
       <div className="mt-1 flex justify-between gap-2 font-mono text-[10.5px] whitespace-nowrap tabular-nums text-muted-foreground">
         <span className="truncate">
           {formatGigabytePair(gpu.memory_used_bytes, gpu.memory_total_bytes)}
@@ -232,16 +226,38 @@ export function GpuCard({
 }
 
 /**
- * The memory bar's fill: ink while the inference service holds it, grey when
- * something else does, and pale while the card is only holding memory rather
- * than computing — the same three readings the rail's cells give, so a bar and
- * a cell never disagree about the same card. The hatch marks the same thing as
- * the grey where there is room to draw it.
+ * The memory bar: the same encode as the rail's cells — full length is
+ * allocated, ink is the inference service's memory and the hatch is everyone
+ * else's, and the whole fill goes pale while the card is only holding memory.
+ * One implementation, so a bar and a cell cannot disagree about a card.
  */
-function memoryBar(gpu: GpuMetric, owned: Set<number>) {
-  return cn(
-    owned.has(gpu.index) ? "bg-primary" : "bg-muted-foreground",
-    isBusy(gpu) ? "opacity-100" : "opacity-30",
+function MemoryBar({
+  gpu,
+  owned,
+  thick,
+}: {
+  gpu: GpuMetric;
+  owned: Set<number>;
+  /** The runtime page's cards have room for a taller bar than the rail rows. */
+  thick?: boolean;
+}) {
+  const split = memorySplit(gpu, owned);
+  const share = split.used > 0 ? split.own / split.used : 0;
+  const height = thick ? "h-1.5" : "h-[5px]";
+  return (
+    <div
+      className={cn("mt-1.5 overflow-hidden rounded-full bg-muted", height)}
+    >
+      <div
+        className={cn("rounded-full", height, isBusy(gpu) ? "" : "opacity-30")}
+        style={{ width: `${split.used}%` }}
+      >
+        <div className="flex h-full w-full">
+          <span className="bg-primary" style={{ width: `${share * 100}%` }} />
+          <span className="hatch-foreign flex-1" />
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -272,7 +288,6 @@ export function GpuMiniRows({
     // max-content and pushes the utilization/temp columns out of the card.
     <div className="grid grid-cols-[minmax(0,1fr)] gap-2.5">
       {metrics.gpus.map((gpu) => {
-        const used = percent(gpu.memory_used_bytes, gpu.memory_total_bytes);
         const utilization = gpu.utilization_percent ?? 0;
         return (
           <div key={gpu.index}>
@@ -284,12 +299,7 @@ export function GpuMiniRows({
               </span>
               <span className="shrink-0 font-mono">{utilization}%</span>
             </div>
-            <div className="mt-1.5 h-[5px] overflow-hidden rounded-full bg-muted">
-              <div
-                className={cn("h-[5px] rounded-full", memoryBar(gpu, owned))}
-                style={{ width: `${used}%` }}
-              />
-            </div>
+            <MemoryBar gpu={gpu} owned={owned} />
             {/* Both halves must stay on one line: ~158px of usable width in
                 the rail leaves no room to wrap, and a wrapped row grows the
                 card until it runs off the bottom of the viewport. nowrap +
@@ -351,7 +361,9 @@ export function GpuHeatGrid({
   const alone = gpus.length === 1;
   return (
     <span className="grid shrink-0 grid-cols-2 auto-rows-[16px] gap-0.5">
-      {gpus.map((gpu) => (
+      {gpus.map((gpu) => {
+        const split = memorySplit(gpu, owned);
+        return (
         <span
           key={gpu.index}
           title={gpuRowTitle(gpu)}
@@ -367,16 +379,29 @@ export function GpuHeatGrid({
           <span
             className={cn(
               "absolute inset-x-0 bottom-0",
-              // Hatched = held by something that is not the inference service;
-              // solid ink = ours. On a box whose runtime is not running, every
-              // bar is hatched, which is exactly what the memory means there.
-              owned.has(gpu.index) ? "bg-primary" : "hatch-foreign",
               isBusy(gpu) ? "opacity-100" : "opacity-30",
             )}
-            style={{ height: `${memoryPercent(gpu)}%` }}
-          />
+            style={{ height: `${split.used}%` }}
+          >
+            {/* Along the memory axis: ours at the base of the fill, everyone
+                else's stacked on top of it. A box whose runtime is not
+                running is hatched end to end — which is what its memory is. */}
+            {split.foreign > 0 && (
+              <span
+                className="hatch-foreign absolute inset-x-0 top-0"
+                style={{ height: `${(split.foreign / split.used) * 100}%` }}
+              />
+            )}
+            {split.own > 0 && (
+              <span
+                className="absolute inset-x-0 bottom-0 bg-primary"
+                style={{ height: `${(split.own / split.used) * 100}%` }}
+              />
+            )}
+          </span>
         </span>
-      ))}
+        );
+      })}
     </span>
   );
 }
@@ -415,6 +440,29 @@ function memoryPercent(gpu: GpuMetric) {
   const { memory_total_bytes: total, memory_used_bytes: used } = gpu;
   if (!total || used === undefined) return 0;
   return Math.min(100, Math.max(0, (used / total) * 100));
+}
+
+/**
+ * How a card's allocated memory divides between the inference service and
+ * everything else, as percentages of the card's total. Both halves are drawn
+ * in every gauge, along the memory axis, so a card holding memory for two
+ * owners shows two segments rather than one colour that has to be interpreted.
+ *
+ * `own_memory_bytes` is the exact answer when the agent can attribute memory
+ * to processes. Without it (an older agent, a driver that cannot attribute,
+ * an AMD box) the device spec is all there is, and it splits a card
+ * all-or-nothing.
+ */
+export function memorySplit(gpu: GpuMetric, owned: Set<number>) {
+  const used = memoryPercent(gpu);
+  const total = gpu.memory_total_bytes;
+  const ownBytes =
+    gpu.own_memory_bytes ?? (owned.has(gpu.index) ? gpu.memory_used_bytes : 0);
+  const own =
+    total > 0
+      ? Math.min(used, Math.max(0, (ownBytes / total) * 100))
+      : 0;
+  return { used, own, foreign: Math.max(0, used - own) };
 }
 
 /**

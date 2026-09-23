@@ -125,6 +125,13 @@ export interface GpuMetric {
   memory_used_bytes: number;
   /** Optional: the Agent omits the field entirely when it cannot sample it. */
   utilization_percent?: number;
+  /**
+   * Of `memory_used_bytes`, what the inference runtime on that node holds.
+   * Omitted when the driver cannot attribute memory per process, or when no
+   * runtime of ours is running — the console then falls back to the device
+   * spec, which can only split a card all-or-nothing.
+   */
+  own_memory_bytes?: number;
   temperature_c?: number;
   power_watts?: number;
 }

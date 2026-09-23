@@ -103,7 +103,8 @@ func sameDeviceSet(a, b map[int]bool) bool {
 // of the emptiest card. Windows builds have no NVML binding, so fall back to
 // one nvidia-smi query (drivers ship it on every platform).
 func sampleFreestDevice() string {
-	if resp := sampleMetrics(); resp.Available && len(resp.GPUs) > 0 {
+	// Placement only needs what is free: no runtime to attribute to.
+	if resp := sampleMetrics(0); resp.Available && len(resp.GPUs) > 0 {
 		return pickFreestDevice(resp.GPUs)
 	}
 	return nvidiaSmiFreest()

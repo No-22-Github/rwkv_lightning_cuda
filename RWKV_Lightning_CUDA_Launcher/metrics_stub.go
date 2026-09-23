@@ -15,6 +15,6 @@ func nvmlInit() error {
 	return fmt.Errorf("NVML requires a Linux launcher built with cgo (this build: %s, cgo off or unsupported)", runtime.GOOS)
 }
 
-func nvmlSample() ([]gpuSample, error) {
+func nvmlSample(rootPID int) ([]gpuSample, error) {
 	return nil, nvmlInit()
 }

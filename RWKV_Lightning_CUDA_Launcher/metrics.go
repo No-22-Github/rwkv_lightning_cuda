@@ -34,6 +34,11 @@ type gpuSample struct {
 	UtilizationPercent int    `json:"utilization_percent"`
 	TemperatureC       *int   `json:"temperature_c,omitempty"`
 	PowerWatts         *int   `json:"power_watts,omitempty"`
+	// Of MemoryUsedBytes, what the launcher's own runtime holds. Optional:
+	// only NVML attributes memory per process, and only for the PIDs of a
+	// runtime this launcher started. When it is absent the console falls back
+	// to the device spec, which can only split a card all-or-nothing.
+	OwnMemoryBytes *uint64 `json:"own_memory_bytes,omitempty"`
 }
 
 type metricsResponse struct {
@@ -44,14 +49,17 @@ type metricsResponse struct {
 	GPUs      []gpuSample `json:"gpus"`
 }
 
-func sampleMetrics() metricsResponse {
+// rootPID is the runtime this launcher started, whose memory the sample
+// attributes where the driver can. Zero means no runtime of ours: pass it
+// when the sample only needs the aggregate numbers.
+func sampleMetrics(rootPID int) metricsResponse {
 	vendor, why := gpuVendor()
 	resp := metricsResponse{Vendor: vendor, GPUs: []gpuSample{}}
 	var gpus []gpuSample
 	var err error
 	switch vendor {
 	case vendorNvidia:
-		gpus, err = nvmlSample()
+		gpus, err = nvmlSample(rootPID)
 	case vendorAMD:
 		gpus, err = rocmSample()
 	default:

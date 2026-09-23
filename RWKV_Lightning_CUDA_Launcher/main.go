@@ -200,6 +200,17 @@ func (p *process) launch(exe string, args []string, secret string, deviceSpec st
 	return nil
 }
 func (p *process) active() bool { p.mu.Lock(); defer p.mu.Unlock(); return p.cmd != nil }
+
+// pid is the running child's PID, or 0 when nothing is running. The metrics
+// sampler uses it to tell the runtime's memory from everyone else's.
+func (p *process) pid() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.cmd == nil || p.cmd.Process == nil {
+		return 0
+	}
+	return p.cmd.Process.Pid
+}
 func (p *process) stop() error {
 	p.mu.Lock()
 	if p.cmd == nil {

@@ -167,7 +167,7 @@ func TestMetricsUnavailableIsExplicit(t *testing.T) {
 	// On a machine without a GPU management interface (this test host
 	// class), metrics must be available=false with a reason and an empty
 	// GPU list — never zero-filled samples.
-	m := sampleMetrics()
+	m := sampleMetrics(0)
 	if m.Available {
 		// A real GPU host: then the sample must be complete instead.
 		if len(m.GPUs) == 0 {
