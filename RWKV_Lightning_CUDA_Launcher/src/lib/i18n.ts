@@ -148,6 +148,7 @@ const zh = {
   "nodes.unreachableHint":
     "可达性只代表最近一次探测连通，不等于推理服务已就绪，也不等于模型已加载。",
 
+  "process.runtime": "推理",
   "runtime.title": "推理服务",
   "runtime.subtitle":
     "在该节点上启动、停止与重启原生推理进程。路径属于节点所在机器。",
@@ -652,6 +653,7 @@ const en: Record<MessageKey, string> = {
   "nodes.unreachableHint":
     "Reachability only means the last probe connected — it does not mean the inference service is ready, and neither means the model is loaded.",
 
+  "process.runtime": "Inference",
   "runtime.title": "Inference service",
   "runtime.subtitle":
     "Start, stop and restart the native inference process on this node. Paths belong to the node's machine.",

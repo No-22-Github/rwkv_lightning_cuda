@@ -5,7 +5,6 @@ import {
   ScrollText,
   Square,
 } from "lucide-react";
-import type { ReactNode } from "react";
 import { useCurrent } from "@/app/use-current";
 import { modelName, runtimeStateLabel } from "@/components/node-status";
 import { runtimeButtonState } from "@/components/runtime-controls";
@@ -99,7 +98,10 @@ export function nodeProcessRows(
   const rows: ProcessRow[] = [
     {
       key: "runtime",
-      label: "runtime.title",
+      // Its own key, not the page's: "推理服务" beside "训练 / 量化" made one
+      // label twice as wide as the other two and shoved the states out of
+      // line. The page keeps "推理服务"; this list says "推理".
+      label: "process.runtime",
       tone: !reachable
         ? "bad"
         : runtime?.status === "ready"
@@ -141,20 +143,6 @@ export function nodeProcessRows(
   return rows;
 }
 
-/**
- * One action slot. The four actions get four fixed columns, so a process that
- * does not offer one leaves its column empty instead of packing the rest to
- * the right — which is how training's Stop ended up under the runtime's
- * Restart.
- */
-function Slot({ children }: { children?: ReactNode }) {
-  return children ? (
-    <>{children}</>
-  ) : (
-    <span aria-hidden="true" className="size-7" />
-  );
-}
-
 function ProcessActions({ row }: { row: ProcessRow }) {
   const { t } = useI18n();
   const { backendId } = useCurrent();
@@ -164,80 +152,75 @@ function ProcessActions({ row }: { row: ProcessRow }) {
 
   const nodes = () => useNodes.getState();
   return (
-    <span className="grid shrink-0 grid-cols-4 items-center gap-0.5">
-      <Slot>
-        {row.startable && (
-          <Button
-            size="icon"
-            variant="ghost"
-            title={t("common.start")}
-            aria-label={t("common.start")}
-            disabled={row.startDisabled}
-            onClick={() =>
-              void run(
-                () =>
-                  nodes().startRuntime(
-                    backendId,
-                    applyDevice({ ...config }, devices),
-                  ),
-                t("runtime.started"),
-              )
-            }
-          >
-            <Play className="size-3.5" />
-          </Button>
-        )}
-      </Slot>
-      <Slot>
+    <span className="flex shrink-0 items-center gap-0.5">
+      {row.startable && (
         <Button
           size="icon"
           variant="ghost"
-          title={t("common.stop")}
-          aria-label={t("common.stop")}
-          disabled={row.stopDisabled}
+          title={t("common.start")}
+          aria-label={t("common.start")}
+          disabled={row.startDisabled}
           onClick={() =>
             void run(
               () =>
-                row.key === "runtime"
-                  ? nodes().stopRuntime(backendId)
-                  : nodes().stopJob(backendId, row.key),
-              t("runtime.stopped"),
+                nodes().startRuntime(
+                  backendId,
+                  applyDevice({ ...config }, devices),
+                ),
+              t("runtime.started"),
             )
           }
         >
-          <Square className="size-3.5" />
+          <Play className="size-3.5" />
         </Button>
-      </Slot>
-      <Slot>
-        {row.startable && (
-          <Button
-            size="icon"
-            variant="ghost"
-            title={t("common.restart")}
-            aria-label={t("common.restart")}
-            disabled={row.restartDisabled}
-            onClick={() =>
-              void run(
-                () => nodes().restartRuntime(backendId),
-                t("runtime.restarted"),
-              )
-            }
-          >
-            <RotateCcw className="size-3.5" />
-          </Button>
-        )}
-      </Slot>
-      <Slot>
+      )}
+      <Button
+        size="icon"
+        variant="ghost"
+        title={t("common.stop")}
+        aria-label={t("common.stop")}
+        disabled={row.stopDisabled}
+        onClick={() =>
+          void run(
+            () =>
+              row.key === "runtime"
+                ? nodes().stopRuntime(backendId)
+                : nodes().stopJob(backendId, row.key),
+            t("runtime.stopped"),
+          )
+        }
+      >
+        <Square className="size-3.5" />
+      </Button>
+      {row.startable && (
         <Button
           size="icon"
           variant="ghost"
-          title={t("logs.open")}
-          aria-label={t("logs.open")}
-          onClick={() => show(row.key)}
+          title={t("common.restart")}
+          aria-label={t("common.restart")}
+          disabled={row.restartDisabled}
+          onClick={() =>
+            void run(
+              () => nodes().restartRuntime(backendId),
+              t("runtime.restarted"),
+            )
+          }
         >
-          <ScrollText className="size-3.5" />
+          <RotateCcw className="size-3.5" />
         </Button>
-      </Slot>
+      )}
+      <Button
+        size="icon"
+        variant="ghost"
+        title={t("logs.open")}
+        aria-label={t("logs.open")}
+        onClick={() => show(row.key)}
+      >
+        <ScrollText className="size-3.5" />
+      </Button>
+      {/* Packed to the trailing edge rather than into fixed columns: the
+          rows offer different actions, and a column per action left holes in
+          the middle of the shorter rows. */}
     </span>
   );
 }
@@ -282,7 +265,11 @@ export function NodeProcessList({ className }: { className?: string }) {
           <StatusDot tone={row.tone} />
           <span className="block min-w-0">
             <span className="flex items-baseline gap-2">
-              <span className="shrink-0 text-[12.5px] font-medium">
+              {/* A floor under the label, not a fixed width: "推理 / 训练 /
+                  量化" are equal in Chinese, but "Inference / Training /
+                  Quantization" are not, and without it the state word starts
+                  at three different x. */}
+              <span className="min-w-21 shrink-0 text-[12.5px] font-medium">
                 {t(row.label)}
               </span>
               <span className="min-w-0 truncate text-[11px] text-muted-foreground">
