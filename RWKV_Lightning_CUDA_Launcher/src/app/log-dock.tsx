@@ -167,17 +167,18 @@ export function LogDockToggle() {
   const open = useLogDock((s) => s.open);
   const toggle = useLogDock((s) => s.toggle);
   return (
+    // Same treatment as the sidebar toggle at the other end of the bar: ghost,
+    // 36px, 16px icon. Two bordered squares of different sizes at the two ends
+    // of the same row read as two different kinds of control.
     <Button
+      variant="ghost"
       size="icon-sm"
-      variant="outline"
-      // Pressed, not primary: a solid black square next to Start reads as the
-      // most important thing on the header, which a log toggle is not.
-      className={cn(open && "bg-accent text-foreground")}
+      className={cn("size-9", open && "bg-accent text-foreground")}
       title={t("logs.toggle")}
       aria-pressed={open}
       onClick={toggle}
     >
-      <ScrollText className="size-3.5" />
+      <ScrollText className="size-4" />
     </Button>
   );
 }
