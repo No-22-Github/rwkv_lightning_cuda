@@ -91,6 +91,33 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
   const memoryLine = totalBytes
     ? formatGigabytePair(usedBytes, totalBytes, 0)
     : "";
+  // The tallest card decides: averaging a hot one away is how a box cooks
+  // without the console mentioning it.
+  const temps = gpus
+    .map((gpu) => gpu.temperature_c)
+    .filter((c): c is number => c !== undefined);
+  const temperatureLine = temps.length ? `${Math.max(...temps)}°C` : "";
+  const idleCards = gpus.filter(
+    (gpu) => (gpu.utilization_percent ?? 0) <= 5,
+  ).length;
+  const hottest = temps.length ? Math.max(...temps) : undefined;
+  const readings = [
+    {
+      label: gpus.length ? t("rail.utilization") : "",
+      value: utilizationLine,
+    },
+    { label: memoryLine ? t("rail.memory") : "", value: memoryLine },
+    {
+      label: temperatureLine ? t("rail.temperature") : "",
+      value: temperatureLine,
+      warn: hottest !== undefined && hottest > 85,
+    },
+    {
+      label: gpus.length ? t("rail.idleCards") : "",
+      value: gpus.length ? `${idleCards} / ${gpus.length}` : "",
+    },
+    // Longest label first, stable for ties.
+  ].sort((a, b) => b.label.length - a.label.length);
   const owned = ownedDevices(
     runtime,
     gpus.map((gpu) => gpu.index),
@@ -148,59 +175,40 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
                 side off, it does not take a row away. */}
             <span className="mt-2 flex items-center gap-2">
               {gpus.length > 0 ? (
-                // Keyed on the shape: CSS cannot interpolate a grid between
-                // two and four tracks, so the change of shape gets a fade
-                // rather than a morph.
-                <GpuHeatGrid
-                  key={collapsed ? "tall" : "wide"}
-                  gpus={gpus}
-                  owned={owned}
-                  wide={!collapsed}
-                  className="animate-fade-in"
-                />
+                <GpuHeatGrid gpus={gpus} owned={owned} />
               ) : (
                 // Keeps the block's footprint on a node whose metrics have not
                 // arrived yet, so the card does not resize under the pointer.
-                <span
-                  className={cn(
-                    collapsed ? "h-[70px] w-[26px]" : "h-[34px] w-[54px]",
-                  )}
-                />
+                <span className="h-[70px] w-[26px]" />
               )}
+              {/* Longest label first: the labels are left-aligned and the
+                  values follow them, so ordering by length keeps the eye from
+                  stepping in and out on every line. Sorted at render time, so
+                  each language gets its own order. */}
               <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                {/* Label muted, value foreground, both in the sans face with
-                    tabular figures: a half-grey mono pair read as one long
-                    monospace sentence next to the block. */}
-                <span
-                  className={cn(
-                    "flex min-w-0 items-baseline gap-1.5 text-[10.5px] transition-opacity",
-                    collapsed && "opacity-0",
-                  )}
-                >
-                  {gpus.length > 0 && (
-                    <span className="shrink-0 text-muted-foreground">
-                      {t("rail.utilization")}
+                {readings.map((line) => (
+                  <span
+                    key={line.label || line.value}
+                    className={cn(
+                      "flex min-w-0 items-baseline gap-1.5 text-[10.5px] transition-opacity",
+                      collapsed && "opacity-0",
+                    )}
+                  >
+                    {line.label && (
+                      <span className="shrink-0 text-muted-foreground">
+                        {line.label}
+                      </span>
+                    )}
+                    <span
+                      className={cn(
+                        "min-w-0 truncate tabular-nums",
+                        line.warn && "text-warning",
+                      )}
+                    >
+                      {line.value}
                     </span>
-                  )}
-                  <span className="min-w-0 truncate tabular-nums">
-                    {utilizationLine}
                   </span>
-                </span>
-                <span
-                  className={cn(
-                    "flex min-w-0 items-baseline gap-1.5 text-[10.5px] transition-opacity",
-                    collapsed && "opacity-0",
-                  )}
-                >
-                  {memoryLine && (
-                    <span className="shrink-0 text-muted-foreground">
-                      {t("rail.memory")}
-                    </span>
-                  )}
-                  <span className="min-w-0 truncate tabular-nums">
-                    {memoryLine}
-                  </span>
-                </span>
+                ))}
               </span>
             </span>
           </button>

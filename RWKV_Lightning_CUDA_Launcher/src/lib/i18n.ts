@@ -66,6 +66,8 @@ const zh = {
   // 卡片那两行的标签；数值由代码拼（数值用 foreground，标签用 muted）。
   "rail.utilization": "利用率",
   "rail.memory": "显存",
+  "rail.temperature": "最高温度",
+  "rail.idleCards": "空闲",
 
   "backend.local": "本机",
   "backend.registered": "已注册后端",
@@ -587,6 +589,8 @@ const en: Record<MessageKey, string> = {
   "rail.gpuSummaryOne": "GPU utilization {avg}%",
   "rail.utilization": "Utilization",
   "rail.memory": "VRAM",
+  "rail.temperature": "Max temp",
+  "rail.idleCards": "Idle",
 
   "backend.local": "This machine",
   "backend.registered": "REGISTERED BACKENDS",
