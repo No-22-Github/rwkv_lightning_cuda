@@ -63,10 +63,9 @@ const zh = {
   // 聚合读数，明细留给悬浮卡片。
   "rail.gpuSummary": "{count} 张 GPU · 平均利用率 {avg}%",
   "rail.gpuSummaryOne": "GPU 利用率 {avg}%",
-  // 卡片里的热力格已经按卡数排格子，这一行只需要补上格子里读不出的平均值。
-  "rail.gpuAverage": "平均利用率 {avg}%",
-  // 全机合计显存；卡片第二行，收起态同样淡出。
-  "rail.gpuMemory": "显存 {pair}",
+  // 卡片那两行的标签；数值由代码拼（数值用 foreground，标签用 muted）。
+  "rail.utilization": "利用率",
+  "rail.memory": "显存",
 
   "backend.local": "本机",
   "backend.registered": "已注册后端",
@@ -128,6 +127,13 @@ const zh = {
   "status.modelLoaded": "已加载模型",
   "status.noModel": "未加载模型",
 
+  "nodes.sumReachable": "节点可达",
+  "nodes.sumGpus": "张 GPU",
+  "nodes.sumMemory": "显存",
+  "nodes.sumJobs": "个任务运行中",
+  "nodes.gpuHeader": "{count} × {name}",
+  "nodes.actions": "节点操作",
+  "nodes.current": "当前",
   "nodes.title": "节点总览",
   "nodes.subtitle":
     "所有已注册后端的可达性、推理服务状态与运行中的任务。切换节点后所有页面跟随该节点。",
@@ -572,8 +578,8 @@ const en: Record<MessageKey, string> = {
   "header.expandSidebar": "Expand sidebar",
   "rail.gpuSummary": "{count} GPUs · {avg}% average utilization",
   "rail.gpuSummaryOne": "GPU utilization {avg}%",
-  "rail.gpuAverage": "GPU average {avg}%",
-  "rail.gpuMemory": "VRAM {pair}",
+  "rail.utilization": "Utilization",
+  "rail.memory": "VRAM",
 
   "backend.local": "This machine",
   "backend.registered": "REGISTERED BACKENDS",
@@ -633,6 +639,13 @@ const en: Record<MessageKey, string> = {
   "status.modelLoaded": "model",
   "status.noModel": "no model loaded",
 
+  "nodes.sumReachable": "reachable",
+  "nodes.sumGpus": "GPUs",
+  "nodes.sumMemory": "VRAM",
+  "nodes.sumJobs": "jobs running",
+  "nodes.gpuHeader": "{count} × {name}",
+  "nodes.actions": "Node actions",
+  "nodes.current": "Current",
   "nodes.title": "Nodes",
   "nodes.subtitle":
     "Reachability, inference state and running jobs across every registered backend. Switching a node re-scopes every page.",

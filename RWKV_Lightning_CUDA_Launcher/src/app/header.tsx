@@ -1,6 +1,5 @@
 import { LogDockToggle } from "@/app/log-dock";
 import { RailToggle } from "@/app/rail";
-import { NodeProcessMenu } from "@/components/node-processes";
 import { useI18n, type MessageKey } from "@/lib/i18n";
 import { useRoute, type Route } from "@/lib/router";
 import { usePageTitle } from "@/stores/ui";
@@ -48,12 +47,10 @@ export function Header() {
 
       <div className="flex-1" />
 
-      {/* Status and commands are the same object: one chip that reports the
-          node's inference state and opens the three process rows. The bare
-          Start / Stop / Restart used to sit here on every page, which put an
-          unlabelled pair directly above each page's own labelled pair. */}
-      <NodeProcessMenu />
-
+      {/* The node's process chip used to sit here. Its commands belong to the
+          node — the overview's detail panel and the rail's node card both show
+          them next to the state they act on, and the bar keeps only what acts
+          on the console itself. */}
       <LogDockToggle />
     </header>
   );

@@ -22,15 +22,16 @@ export function compactGpuName(name: string) {
   return name.replace(/^NVIDIA\s+/i, "");
 }
 
-/** `status` alone is not enough: an inference-only node is "n/a", not offline. */
+/**
+ * The service's tone, in three states: green while it is serving, red when it
+ * failed, grey otherwise. Amber is not one of them — it is reserved for
+ * "needs handling" (a card near a limit, a temperature over the line), and a
+ * service that is merely starting or stopped is not that.
+ */
 export function runtimeTone(runtime?: RuntimeState): StatusTone {
   switch (runtime?.status) {
     case "ready":
       return "ok";
-    case "starting":
-    case "stopping":
-    case "running":
-      return "warn";
     case "error":
       return "bad";
     default:
@@ -95,33 +96,12 @@ export function runtimeStatus(
   kind: string,
   status: string | undefined,
 ): { tone: StatusTone; key: "unreachable" | "inferenceOnly" | "runtime" } {
-  if (!reachable) return { tone: "bad", key: "unreachable" };
-  if (kind === "inference_only") return { tone: "info", key: "inferenceOnly" };
+  // An unreachable node is not a service state: its card dims and says so,
+  // and the dot stays grey rather than claiming the service failed.
+  if (!reachable) return { tone: "idle", key: "unreachable" };
+  if (kind === "inference_only") return { tone: "idle", key: "inferenceOnly" };
+  if (status === "error") return { tone: "bad", key: "runtime" };
   return { tone: status === "ready" ? "ok" : "idle", key: "runtime" };
-}
-
-/**
- * Overall node tone used by the rail dot and the node cards. Reachable but
- * not serving is "warn", never "idle": a grey dot next to a live node reads
- * as "no information", which is exactly the state a console exists to
- * disambiguate — the runtime text right below carries the detail.
- */
-export function nodeTone(
-  backend: BackendView | undefined,
-  runtime?: RuntimeState,
-  jobsRunning = false,
-): StatusTone {
-  if (!backend?.reachable) return "bad";
-  if (runtime?.status === "ready") return "ok";
-  if (runtime?.status === "error") return "bad";
-  if (
-    jobsRunning ||
-    runtime?.status === "starting" ||
-    runtime?.status === "stopping"
-  )
-    return "warn";
-  if (backend.kind === "inference_only") return "info";
-  return "warn";
 }
 
 /**
@@ -249,11 +229,15 @@ function MemoryBar({
       className={cn("mt-1.5 overflow-hidden rounded-full bg-muted", height)}
     >
       <div
-        className={cn("rounded-full", height, isBusy(gpu) ? "" : "opacity-30")}
+        className={cn(
+          "rounded-full",
+          height,
+          isBusy(gpu) ? "" : "opacity-30 dark:opacity-20",
+        )}
         style={{ width: `${split.used}%` }}
       >
         <div className="flex h-full w-full">
-          <span className="bg-primary" style={{ width: `${share * 100}%` }} />
+          <span className="bg-foreground" style={{ width: `${share * 100}%` }} />
           <span className="hatch-foreign flex-1" />
         </div>
       </div>
@@ -379,7 +363,9 @@ export function GpuHeatGrid({
           <span
             className={cn(
               "absolute inset-x-0 bottom-0",
-              isBusy(gpu) ? "opacity-100" : "opacity-30",
+              // One colour, two weights: idle is the same fill held back. The
+              // dark theme needs less of it to read as "held, not working".
+              isBusy(gpu) ? "opacity-100" : "opacity-30 dark:opacity-20",
             )}
             style={{ height: `${split.used}%` }}
           >
@@ -394,7 +380,7 @@ export function GpuHeatGrid({
             )}
             {split.own > 0 && (
               <span
-                className="absolute inset-x-0 bottom-0 bg-primary"
+                className="absolute inset-x-0 bottom-0 bg-foreground"
                 style={{ height: `${(split.own / split.used) * 100}%` }}
               />
             )}
@@ -485,9 +471,9 @@ function isBusy(gpu: GpuMetric) {
 function attentionRing(gpu: GpuMetric) {
   const memory = memoryPercent(gpu);
   const temp = gpu.temperature_c;
-  if (memory >= 97 || (temp !== undefined && temp >= 92))
+  if (memory >= 99.5 || (temp !== undefined && temp >= 95))
     return "ring-destructive";
-  if (memory >= 90 || (temp !== undefined && temp >= 85)) return "ring-warning";
+  if (memory > 95 || (temp !== undefined && temp > 85)) return "ring-warning";
   return "ring-border";
 }
 

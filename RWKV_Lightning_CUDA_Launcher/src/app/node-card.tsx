@@ -3,7 +3,6 @@ import { useCurrent } from "@/app/use-current";
 import { NodeProcessList } from "@/components/node-processes";
 import {
   GpuHeatGrid,
-  GpuMiniRows,
   gpuUnavailableReason,
   ownedDevices,
   runtimeHint,
@@ -19,14 +18,11 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { formatGigabytePair, formatRelativeTime } from "@/lib/format";
-import { useI18n, type MessageKey } from "@/lib/i18n";
-import type { BackendView, MetricsResponse } from "@/lib/api/types";
+import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { backendKindLabel, backendLabel, useBackends } from "@/stores/backends";
 import { useNodes } from "@/stores/nodes";
 import { useRail, useUI } from "@/stores/ui";
-
-type TFn = (key: MessageKey, vars?: Record<string, string | number>) => string;
 
 /**
  * Bottom-of-rail node card: one card at two rail widths.
@@ -86,22 +82,15 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
     (sum, gpu) => sum + (gpu.memory_total_bytes ?? 0),
     0,
   );
-  // The grid already counts the cards, so these lines only have to add what a
-  // per-card colour cannot show: the average, and the whole box's memory.
-  // Whole gigabytes: eight cards summed to one decimal each is noise, and
-  // "86 / 765 GB" is the reading that fits the rail.
-  const gpuSummary =
-    gpus.length > 1
-      ? t("rail.gpuAverage", { avg: average })
-      : gpus.length === 1
-        ? t("rail.gpuSummaryOne", { avg: average })
-        : gpuUnavailableReason(t, metrics, metricsError, backend);
-  const memoryLine =
-    totalBytes > 0
-      ? t("rail.gpuMemory", {
-          pair: formatGigabytePair(usedBytes, totalBytes, 0),
-        })
-      : "";
+  // Two readings the grid cannot show: how hard the box is working, and how
+  // much of its memory is allocated. Whole gigabytes — eight cards summed to
+  // one decimal each is noise.
+  const utilizationLine = gpus.length
+    ? `${average}%`
+    : gpuUnavailableReason(t, metrics, metricsError, backend);
+  const memoryLine = totalBytes
+    ? formatGigabytePair(usedBytes, totalBytes, 0)
+    : "";
   const owned = ownedDevices(
     runtime,
     gpus.map((gpu) => gpu.index),
@@ -166,21 +155,38 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
                 <span className="h-[70px] w-[26px]" />
               )}
               <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                {/* Label muted, value foreground, both in the sans face with
+                    tabular figures: a half-grey mono pair read as one long
+                    monospace sentence next to the block. */}
                 <span
                   className={cn(
-                    "truncate font-mono text-[10.5px] text-muted-foreground transition-opacity",
+                    "flex min-w-0 items-baseline gap-1.5 text-[10.5px] transition-opacity",
                     collapsed && "opacity-0",
                   )}
                 >
-                  {gpuSummary}
+                  {gpus.length > 0 && (
+                    <span className="shrink-0 text-muted-foreground">
+                      {t("rail.utilization")}
+                    </span>
+                  )}
+                  <span className="min-w-0 truncate tabular-nums">
+                    {utilizationLine}
+                  </span>
                 </span>
                 <span
                   className={cn(
-                    "truncate font-mono text-[10.5px] text-muted-foreground transition-opacity",
+                    "flex min-w-0 items-baseline gap-1.5 text-[10.5px] transition-opacity",
                     collapsed && "opacity-0",
                   )}
                 >
-                  {memoryLine}
+                  {memoryLine && (
+                    <span className="shrink-0 text-muted-foreground">
+                      {t("rail.memory")}
+                    </span>
+                  )}
+                  <span className="min-w-0 truncate tabular-nums">
+                    {memoryLine}
+                  </span>
                 </span>
               </span>
             </span>
@@ -219,18 +225,9 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
               </div>
           </div>
 
-          <GpuRows
-            metrics={metrics}
-            metricsError={metricsError}
-            backend={backend}
-            owned={owned}
-            t={t}
-            className="max-h-[248px] overflow-x-hidden overflow-y-auto border-t border-border px-2.5 py-2.5"
-          />
-
-          {/* The same three process rows the header menu shows: one
-              implementation of "start this / stop that", wherever it is
-              reached from. */}
+          {/* Node switching and the service commands; the per-card numbers
+              moved to the overview's detail panel, which has room to show them
+              as a table instead of a scrolling list. */}
           <div className="border-t border-border">
             <NodeProcessList />
           </div>
@@ -320,7 +317,7 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
  * corner in both rail states: it belongs to the node, and while the rail is
  * closed it is the only thing that carries the tone.
  */
-function NodeAvatar({ name, tone }: { name?: string; tone?: StatusTone }) {
+export function NodeAvatar({ name, tone }: { name?: string; tone?: StatusTone }) {
   return (
     <span className="relative w-[26px] shrink-0">
       <span className="flex h-full min-h-6 w-full items-center justify-center rounded-[6px] bg-muted text-[12px] font-semibold text-muted-foreground">
@@ -337,40 +334,5 @@ function NodeAvatar({ name, tone }: { name?: string; tone?: StatusTone }) {
         />
       )}
     </span>
-  );
-}
-
-/** Per-GPU rows, or the reason there are none; never an all-zero list. */
-function GpuRows({
-  metrics,
-  metricsError,
-  backend,
-  owned,
-  t,
-  className,
-}: {
-  metrics: MetricsResponse | undefined;
-  metricsError: string | undefined;
-  backend: BackendView | undefined;
-  owned: Set<number>;
-  t: TFn;
-  className?: string;
-}) {
-  if (metrics?.available && metrics.gpus.length > 0) {
-    return (
-      <div className={className}>
-        <GpuMiniRows metrics={metrics} owned={owned} />
-      </div>
-    );
-  }
-  return (
-    <p
-      className={cn(
-        "text-[10.5px] leading-relaxed text-muted-foreground",
-        className,
-      )}
-    >
-      {gpuUnavailableReason(t, metrics, metricsError, backend)}
-    </p>
   );
 }

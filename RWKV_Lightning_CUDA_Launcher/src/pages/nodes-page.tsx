@@ -1,11 +1,24 @@
-import { useEffect } from "react";
-import { Boxes, Loader2, Plus, RefreshCw, Server, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import {
+  Boxes,
+  Loader2,
+  MoreHorizontal,
+  Plus,
+  RefreshCw,
+  Server,
+  Trash2,
+} from "lucide-react";
 import {
   CapabilityBadges,
+  GpuHeatGrid,
+  memorySplit,
   modelName,
-  nodeTone,
+  ownedDevices,
   runtimeStateLabel,
+  runtimeStatus,
 } from "@/components/node-status";
+import { NodeAvatar } from "@/app/node-card";
+import { NodeProcessList } from "@/components/node-processes";
 import { PageHeader } from "@/components/common";
 import { Badge, StatusDot } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,9 +28,21 @@ import {
   CardFooter,
   CardHeader,
 } from "@/components/ui/card";
-import { EmptyState, Notice, StatCard } from "@/components/ui/primitives";
-import { formatRelativeTime } from "@/lib/format";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+} from "@/components/ui/dialog";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { EmptyState, Notice } from "@/components/ui/primitives";
+import { formatGigabytePair, formatRelativeTime } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
+import type { BackendView, GpuMetric } from "@/lib/api/types";
+import { cn } from "@/lib/utils";
 import { backendKindLabel, backendLabel, useBackends } from "@/stores/backends";
 import { useNodes } from "@/stores/nodes";
 import { toast, useUI } from "@/stores/ui";
@@ -33,6 +58,7 @@ export function NodesPage() {
   const refreshAll = useNodes((s) => s.refreshAll);
   const snapshots = useNodes((s) => s.snapshots);
   const openAddBackend = useUI((s) => s.openAddBackend);
+  const detailRef = useRef<HTMLDivElement>(null);
 
   // The overview needs every node's runtime + job state, not just the active one.
   useEffect(() => {
@@ -45,27 +71,38 @@ export function NodesPage() {
     };
   }, [refreshAll, list.length]);
 
+  const current = list.find((backend) => backend.id === currentId);
+  const metrics = current ? snapshots[current.id]?.metrics : undefined;
+  const gpus = metrics?.available ? metrics.gpus : [];
   const reachable = list.filter((b) => b.reachable).length;
-  const ready = list.filter(
-    (b) => snapshots[b.id]?.runtime?.status === "ready",
-  ).length;
   const jobCount = list.filter(
     (b) =>
       snapshots[b.id]?.jobs?.tuning?.running ||
       snapshots[b.id]?.jobs?.quantization?.running,
   ).length;
+  const usedBytes = gpus.reduce(
+    (sum, gpu) => sum + (gpu.memory_used_bytes ?? 0),
+    0,
+  );
+  const totalBytes = gpus.reduce(
+    (sum, gpu) => sum + (gpu.memory_total_bytes ?? 0),
+    0,
+  );
 
   return (
-    // Centered and wide: auto-fit collapses empty grid tracks, so a sparse
-    // registry stretches its cards instead of stranding them on the left of
-    // an ultrawide viewport.
     <div className="mx-auto w-full max-w-[1720px] px-6 pt-5.5 pb-10">
       <PageHeader
         title={t("nodes.title")}
         description={t("nodes.subtitle")}
         actions={
           <>
+            {/* An icon: the registry already re-probes on its own timer, this
+                only forces the next round. */}
             <Button
+              size="icon-sm"
+              variant="outline"
+              title={t("backend.probeAll")}
+              aria-label={t("backend.probeAll")}
               disabled={list.length === 0}
               onClick={async () => {
                 await probeAll();
@@ -74,7 +111,6 @@ export function NodesPage() {
               }}
             >
               <RefreshCw className="size-3.5" />
-              {t("backend.probeAll")}
             </Button>
             <Button variant="default" onClick={openAddBackend}>
               <Plus className="size-3.5" />
@@ -90,21 +126,6 @@ export function NodesPage() {
         </Notice>
       )}
 
-      <div className="mt-5 grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3">
-        <StatCard label={t("nodes.registered")} value={list.length} />
-        <StatCard
-          label={t("nodes.reachable")}
-          value={reachable}
-          tone="success"
-        />
-        <StatCard label={t("nodes.runtimeReady")} value={ready} />
-        <StatCard
-          label={t("nodes.runningJobs")}
-          value={jobCount}
-          tone="warning"
-        />
-      </div>
-
       {loaded && list.length === 0 ? (
         <EmptyState
           className="mt-5"
@@ -119,148 +140,289 @@ export function NodesPage() {
           }
         />
       ) : (
-        <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(340px,1fr))] gap-3.5">
-          {list.map((backend) => {
-            const snapshot = snapshots[backend.id];
-            const runtime = snapshot?.runtime;
-            const tone = nodeTone(backend, runtime);
-            const model = modelName(runtime);
-            const job = snapshot?.jobs?.tuning?.running
-              ? `tuning · ${progressLabel(snapshot.jobs.tuning.progress)}`
-              : snapshot?.jobs?.quantization?.running
-                ? `quantization · ${progressLabel(snapshot.jobs.quantization.progress)}`
-                : "";
-            return (
-              <Card key={backend.id} className="flex flex-col overflow-hidden">
-                <CardHeader>
-                  <StatusDot tone={tone} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="truncate text-sm font-semibold tracking-[-0.01em]">
-                        {backendLabel(t, backend)}
-                      </span>
-                      {backend.id === currentId && (
-                        <Badge variant="info">
-                          {t("settings.currentNode")}
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
-                      {backend.base_url}
-                    </div>
-                  </div>
-                  <Badge>
-                    {backendKindLabel(backend.kind) ||
-                      t("backend.kind.unknown")}
-                  </Badge>
-                </CardHeader>
+        <>
+          {/* The numbers, one line, in foreground: the console has no tone for
+              "a number", and colouring totals is how orange crept in. */}
+          <Summary
+            pieces={[
+              { value: `${reachable}/${list.length}`, label: t("nodes.sumReachable") },
+              { value: String(gpus.length), label: t("nodes.sumGpus") },
+              // The one piece whose label leads: "显存 289 / 765 GB" reads as a
+              // quantity of memory, "289 / 765 GB 显存" does not.
+              {
+                value: totalBytes
+                  ? formatGigabytePair(usedBytes, totalBytes, 0)
+                  : "—",
+                label: t("nodes.sumMemory"),
+                labelFirst: true,
+              },
+              { value: String(jobCount), label: t("nodes.sumJobs") },
+            ]}
+          />
 
-                <CardContent className="grid flex-1 gap-2.5">
-                  <div className="grid grid-cols-2 gap-2.5">
-                    <div className="min-w-0">
-                      <div className="text-[11px] text-muted-foreground">
-                        {t("nodes.runtime")}
-                      </div>
-                      <div className="mt-0.5 truncate font-mono text-[12.5px]">
-                        {backend.reachable
-                          ? runtimeStateLabel(t, runtime)
-                          : t("status.unreachable")}
-                      </div>
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-[11px] text-muted-foreground">
-                        {t("nodes.model")}
-                      </div>
-                      <div
-                        className="mt-0.5 truncate font-mono text-[12.5px]"
-                        title={model}
-                      >
-                        {model || "—"}
-                      </div>
-                    </div>
-                  </div>
+          {current && (
+            <div ref={detailRef}>
+              {/* 150ms cross-fade on the swap: keyed so React remounts it. */}
+              <div key={current.id} className="animate-fade-in">
+                <NodeDetail backend={current} />
+              </div>
+            </div>
+          )}
 
-                  <CapabilityBadges capabilities={backend.capabilities} />
+          {/* One node is the whole registry: the grid would be a copy of the
+              panel above it. */}
+          {list.length > 1 && (
+            <div className="mt-4 grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3.5">
+              {list.map((backend) => (
+                <NodeTile
+                  key={backend.id}
+                  backend={backend}
+                  current={backend.id === currentId}
+                  onPick={() =>
+                    detailRef.current?.scrollIntoView({
+                      behavior: "smooth",
+                      block: "start",
+                    })
+                  }
+                />
+              ))}
+            </div>
+          )}
 
-                  {job && (
-                    <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-2">
-                      <StatusDot tone="warn" pulse />
-                      <span className="truncate font-mono text-xs">{job}</span>
-                    </div>
-                  )}
-
-                  {!backend.reachable && backend.probe_error && (
-                    <div className="rounded-lg border border-destructive px-2.5 py-2">
-                      <div className="text-[11.5px] font-semibold text-destructive">
-                        {t("nodes.probeFailed")}
-                      </div>
-                      <div className="mt-0.5 font-mono text-[11px] break-all text-muted-foreground">
-                        {backend.probe_error}
-                      </div>
-                    </div>
-                  )}
-                </CardContent>
-
-                <CardFooter className="mt-auto">
-                  <span className="flex-1 text-[11px] text-muted-foreground">
-                    {t("backend.lastProbe")}{" "}
-                    {backend.last_probe
-                      ? formatRelativeTime(backend.last_probe)
-                      : t("backend.never")}
-                  </span>
-                  <ProbeButton
-                    id={backend.id}
-                    name={backendLabel(t, backend)}
-                  />
-                  <Button
-                    size="xs"
-                    disabled={backend.id === currentId}
-                    onClick={() => useBackends.getState().select(backend.id)}
-                  >
-                    {t("backend.switchTo")}
-                  </Button>
-                  <RemoveButton
-                    id={backend.id}
-                    name={backendLabel(t, backend)}
-                    disabled={backend.id === "local"}
-                  />
-                </CardFooter>
-              </Card>
-            );
-          })}
-        </div>
-      )}
-
-      {list.some((backend) => !backend.reachable) && (
-        <p className="mt-4 flex items-center gap-2 text-[11.5px] text-muted-foreground">
-          <Boxes className="size-3.5" />
-          {t("nodes.unreachableHint")}
-        </p>
+          {list.some((backend) => !backend.reachable) && (
+            <p className="mt-4 flex items-center gap-2 text-[11.5px] text-muted-foreground">
+              <Boxes className="size-3.5" />
+              {t("nodes.unreachableHint")}
+            </p>
+          )}
+        </>
       )}
     </div>
   );
 }
 
-function progressLabel(
-  progress: { step?: number; total?: number } | null | undefined,
-) {
-  if (!progress?.step) return "running";
-  return progress.total
-    ? `step ${progress.step}/${progress.total}`
-    : `step ${progress.step}`;
+interface SummaryPiece {
+  value: string;
+  label: string;
+  /** Label on the left, for readings that are a quantity of something. */
+  labelFirst?: boolean;
 }
 
-function ProbeButton({ id, name }: { id: string; name: string }) {
+/** Counters in one line: the value in foreground, what it counts in muted. */
+function Summary({ pieces }: { pieces: SummaryPiece[] }) {
+  return (
+    <p className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px]">
+      {pieces.map((piece, index) => (
+        <span key={piece.label} className="flex items-center gap-1.5">
+          {index > 0 && (
+            <span aria-hidden="true" className="text-muted-foreground">
+              ·
+            </span>
+          )}
+          {(piece.labelFirst ? ["label", "value"] : ["value", "label"]).map(
+            (part) => (
+              <span
+                key={part}
+                className={
+                  part === "value"
+                    ? "tabular-nums text-foreground"
+                    : "text-muted-foreground"
+                }
+              >
+                {part === "value" ? piece.value : piece.label}
+              </span>
+            ),
+          )}
+        </span>
+      ))}
+    </p>
+  );
+}
+
+/** The active node, full width: services on the left, cards on the right. */
+function NodeDetail({ backend }: { backend: BackendView }) {
+  const { t } = useI18n();
+  const snapshot = useNodes((s) => s.snapshots[backend.id]);
+  const runtime = snapshot?.runtime;
+  const metrics = snapshot?.metrics;
+  const gpus = metrics?.available ? metrics.gpus : [];
+  const status = runtimeStatus(
+    backend.reachable,
+    backend.kind,
+    runtime?.status,
+  );
+  const statusLabel = backend.reachable
+    ? status.key === "inferenceOnly"
+      ? t("status.inferenceOnly")
+      : runtimeStateLabel(t, runtime)
+    : t("status.unreachable");
+  const owned = ownedDevices(
+    runtime,
+    gpus.map((gpu) => gpu.index),
+  );
+
+  return (
+    <Card
+      className={cn("mt-3.5 flex flex-col", !backend.reachable && "opacity-60")}
+    >
+      <CardHeader>
+        <NodeAvatar name={backend.name} />
+        <span className="truncate text-sm font-semibold tracking-[-0.01em]">
+          {backendLabel(t, backend)}
+        </span>
+        <StatusDot tone={status.tone} />
+        <span className="truncate text-[11.5px] text-muted-foreground">
+          {statusLabel}
+        </span>
+        <div className="flex-1" />
+        <NodeMenu backend={backend} />
+      </CardHeader>
+
+      <CardContent className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
+        {/* Services: the three long-lived processes and their four actions,
+            each action in its own column. */}
+        <NodeProcessList columns className="p-0" />
+
+        <div className="min-w-0">
+          <div className="flex items-baseline gap-2 px-2 pb-2 text-[11px] text-muted-foreground">
+            {gpus.length > 0 && (
+              <span className="truncate">
+                {t("nodes.gpuHeader", {
+                  count: gpus.length,
+                  name: gpus[0].name.replace(/^NVIDIA\s+/i, ""),
+                })}
+              </span>
+            )}
+          </div>
+          {gpus.length > 0 ? (
+            <div className="grid gap-0.5">
+              {gpus.map((gpu) => (
+                <GpuRow key={gpu.index} gpu={gpu} owned={owned} />
+              ))}
+            </div>
+          ) : (
+            <p className="px-2 text-[11px] text-muted-foreground">
+              {metrics?.reason ?? t("runtime.gpuNoMetrics")}
+            </p>
+          )}
+        </div>
+      </CardContent>
+
+      <CardFooter className="mt-auto">
+        <CapabilityBadges capabilities={backend.capabilities} />
+        <div className="flex-1" />
+        <span className="text-[11px] text-muted-foreground">
+          {t("backend.lastProbe")}{" "}
+          {backend.last_probe
+            ? formatRelativeTime(backend.last_probe)
+            : t("backend.never")}
+        </span>
+      </CardFooter>
+    </Card>
+  );
+}
+
+/** One card's row in the detail: number, memory, utilization, temperature, power. */
+function GpuRow({ gpu, owned }: { gpu: GpuMetric; owned: Set<number> }) {
+  const split = memorySplit(gpu, owned);
+  const share = split.used > 0 ? split.own / split.used : 0;
+  const temp = gpu.temperature_c;
+  return (
+    <div
+      className="grid grid-cols-[2rem_minmax(0,1fr)_3.5rem_4.5rem_4.5rem] items-center gap-x-2.5 rounded-lg px-2 py-1.5"
+      title={gpu.name}
+    >
+      <span className="font-mono text-[11.5px] tabular-nums text-muted-foreground">
+        #{gpu.index}
+      </span>
+      <span className="h-[5px] overflow-hidden rounded-full bg-muted">
+        <span
+          className={cn(
+            "flex h-full",
+            split.used > 0 && split.own === 0 && "hatch-foreign",
+          )}
+          style={{ width: `${split.used}%` }}
+        >
+          <span className="bg-foreground" style={{ width: `${share * 100}%` }} />
+          {share < 1 && <span className="hatch-foreign flex-1" />}
+        </span>
+      </span>
+      <span className="text-right font-mono text-[11.5px] tabular-nums">
+        {gpu.utilization_percent !== undefined
+          ? `${gpu.utilization_percent}%`
+          : "—"}
+      </span>
+      <span
+        className={cn(
+          "text-right font-mono text-[11.5px] tabular-nums",
+          temp !== undefined && temp > 85 && "text-warning",
+        )}
+      >
+        {temp !== undefined ? `${temp}°C` : "—"}
+      </span>
+      <span className="text-right font-mono text-[11.5px] tabular-nums text-muted-foreground">
+        {gpu.power_watts !== undefined ? `${gpu.power_watts}W` : "—"}
+      </span>
+    </div>
+  );
+}
+
+/** ⋯ : the actions that are not the card's own click. */
+function NodeMenu({ backend }: { backend: BackendView }) {
+  const { t } = useI18n();
+  const [confirming, setConfirming] = useState(false);
+  return (
+    <>
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            title={t("nodes.actions")}
+            aria-label={t("nodes.actions")}
+          >
+            <MoreHorizontal className="size-4" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="end" className="w-[240px] p-1.5">
+          <ProbeRow backend={backend} />
+          <button
+            type="button"
+            disabled={backend.id === "local"}
+            onClick={() => setConfirming(true)}
+            className={cn(
+              "flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-[13px] transition-colors",
+              backend.id === "local"
+                ? "cursor-not-allowed text-muted-foreground"
+                : "text-destructive hover:bg-destructive/10",
+            )}
+          >
+            <Trash2 className="size-3.5" />
+            {t("backend.remove")}
+          </button>
+        </PopoverContent>
+      </Popover>
+      <RemoveDialog
+        backend={backend}
+        open={confirming}
+        onOpenChange={setConfirming}
+      />
+    </>
+  );
+}
+
+function ProbeRow({ backend }: { backend: BackendView }) {
   const { t } = useI18n();
   const probe = useBackends((s) => s.probe);
   const refresh = useNodes((s) => s.refresh);
+  const name = backendLabel(t, backend);
   return (
-    <Button
-      size="xs"
+    <button
+      type="button"
       onClick={async () => {
         try {
-          const view = await probe(id);
-          await refresh(id);
+          const view = await probe(backend.id);
+          await refresh(backend.id);
           if (view.reachable) toast.success(t("backend.probed", { name }));
           else
             toast.error(
@@ -276,47 +438,131 @@ function ProbeButton({ id, name }: { id: string; name: string }) {
           );
         }
       }}
+      className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-[13px] transition-colors hover:bg-muted"
     >
+      <RefreshCw className="size-3.5" />
       {t("backend.probe")}
-    </Button>
+    </button>
   );
 }
 
-function RemoveButton({
-  id,
-  name,
-  disabled,
+function RemoveDialog({
+  backend,
+  open,
+  onOpenChange,
 }: {
-  id: string;
-  name: string;
-  disabled?: boolean;
+  backend: BackendView;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }) {
   const { t } = useI18n();
   const remove = useBackends((s) => s.remove);
   const refresh = useBackends((s) => s.refresh);
+  const name = backendLabel(t, backend);
   return (
-    <Button
-      size="xs"
-      variant="danger"
-      disabled={disabled}
-      title={disabled ? t("backend.localReserved") : t("backend.remove")}
-      onClick={async () => {
-        if (!window.confirm(t("backend.removeConfirm", { name }))) return;
-        try {
-          await remove(id);
-          await refresh();
-          toast.success(t("backend.removed", { name }));
-        } catch (error) {
-          toast.error(
-            t("toast.failed", {
-              error: error instanceof Error ? error.message : String(error),
-            }),
-          );
-        }
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent width="420px">
+        <DialogHeader
+          title={t("backend.remove")}
+          description={t("backend.removeConfirm", { name })}
+        />
+        <div className="flex justify-end gap-2 border-t border-border px-4 py-3">
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>
+            {t("common.cancel")}
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={async () => {
+              onOpenChange(false);
+              try {
+                await remove(backend.id);
+                await refresh();
+                toast.success(t("backend.removed", { name }));
+              } catch (error) {
+                toast.error(
+                  t("toast.failed", {
+                    error: error instanceof Error ? error.message : String(error),
+                  }),
+                );
+              }
+            }}
+          >
+            {t("common.delete")}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** One node in the grid. The whole card is the switch; the rest is the ⋯. */
+function NodeTile({
+  backend,
+  current,
+  onPick,
+}: {
+  backend: BackendView;
+  current: boolean;
+  onPick: () => void;
+}) {
+  const { t } = useI18n();
+  const select = useBackends((s) => s.select);
+  const snapshot = useNodes((s) => s.snapshots[backend.id]);
+  const runtime = snapshot?.runtime;
+  const metrics = snapshot?.metrics;
+  const gpus = metrics?.available ? metrics.gpus : [];
+  const status = runtimeStatus(
+    backend.reachable,
+    backend.kind,
+    runtime?.status,
+  );
+  const owned = ownedDevices(
+    runtime,
+    gpus.map((gpu) => gpu.index),
+  );
+  const model = modelName(runtime);
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        if (current) return;
+        select(backend.id);
+        onPick();
       }}
+      className={cn(
+        "flex flex-col rounded-xl border bg-card p-3 text-left transition-colors",
+        current ? "border-foreground" : "border-border hover:bg-muted",
+        !backend.reachable && "opacity-60",
+      )}
     >
-      <Trash2 className="size-3.5" />
-    </Button>
+      <span className="flex items-center gap-2">
+        <NodeAvatar name={backend.name} />
+        <span className="min-w-0 flex-1 truncate text-[13px] font-semibold tracking-[-0.01em]">
+          {backendLabel(t, backend)}
+        </span>
+        {current && <Badge>{t("nodes.current")}</Badge>}
+        <StatusDot tone={status.tone} />
+      </span>
+      <span className="mt-1.5 flex items-center gap-2">
+        <GpuHeatGrid gpus={gpus} owned={owned} />
+        <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-muted-foreground">
+          {model || backend.base_url}
+        </span>
+      </span>
+      <span className="mt-2 flex items-center gap-2 text-[11px] text-muted-foreground">
+        <span className="truncate">
+          {backendKindLabel(backend.kind) || t("backend.kind.unknown")}
+        </span>
+        <span className="flex-1" />
+        <span className="shrink-0">
+          {backend.reachable
+            ? status.key === "inferenceOnly"
+              ? t("status.inferenceOnly")
+              : runtimeStateLabel(t, runtime)
+            : t("status.unreachable")}
+        </span>
+      </span>
+    </button>
   );
 }
 

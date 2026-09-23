@@ -1,20 +1,10 @@
-import {
-  ChevronsUpDown,
-  Play,
-  RotateCcw,
-  ScrollText,
-  Square,
-} from "lucide-react";
+import { Play, RotateCcw, ScrollText, Square } from "lucide-react";
+import type { ReactNode } from "react";
 import { useCurrent } from "@/app/use-current";
 import { modelName, runtimeStateLabel } from "@/components/node-status";
 import { runtimeButtonState } from "@/components/runtime-controls";
 import { StatusDot, type StatusTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import { applyDevice } from "@/lib/api/launcher";
 import type {
   BackendView,
@@ -23,7 +13,6 @@ import type {
   RuntimeState,
 } from "@/lib/api/types";
 import { useI18n, type MessageKey } from "@/lib/i18n";
-import { navigate } from "@/lib/router";
 import { useAction } from "@/lib/use-action";
 import { cn } from "@/lib/utils";
 import { useRuntimeFormEntry } from "@/stores/forms";
@@ -143,7 +132,35 @@ export function nodeProcessRows(
   return rows;
 }
 
-function ProcessActions({ row }: { row: ProcessRow }) {
+/**
+ * One action slot. Only used where the four actions get fixed columns: a
+ * process that does not offer one leaves its column empty, which keeps the
+ * same action under itself down the list. The narrow popover packs to the
+ * trailing edge instead — there the empty cell reads as a hole.
+ */
+function Slot({
+  children,
+  when,
+}: {
+  children?: ReactNode;
+  /** Fixed-columns layout only; the packed one renders the child as-is. */
+  when?: boolean;
+}) {
+  if (!when) return <>{children}</>;
+  return children ? (
+    <>{children}</>
+  ) : (
+    <span aria-hidden="true" className="size-7" />
+  );
+}
+
+function ProcessActions({
+  row,
+  columns,
+}: {
+  row: ProcessRow;
+  columns?: boolean;
+}) {
   const { t } = useI18n();
   const { backendId } = useCurrent();
   const { config, devices } = useRuntimeFormEntry(backendId);
@@ -158,8 +175,14 @@ function ProcessActions({ row }: { row: ProcessRow }) {
     // shares (stop, logs) sit under their twins, and only the two that the
     // runtime alone offers are ever missing, at the left where the gap reads
     // as "not applicable here" rather than a hole between buttons.
-    <span className="flex shrink-0 items-center gap-0.5">
-      {row.startable && (
+    <span
+      className={cn(
+        "shrink-0 items-center gap-0.5",
+        columns ? "grid grid-cols-4" : "flex",
+      )}
+    >
+      <Slot when={columns}>
+        {row.startable && (
         <Button
           size="icon"
           variant="ghost"
@@ -179,7 +202,9 @@ function ProcessActions({ row }: { row: ProcessRow }) {
         >
           <Play className="size-3.5" />
         </Button>
-      )}
+        )}
+      </Slot>
+      <Slot when={columns}>
       {row.startable && (
         <Button
           size="icon"
@@ -197,6 +222,8 @@ function ProcessActions({ row }: { row: ProcessRow }) {
           <RotateCcw className="size-3.5" />
         </Button>
       )}
+      </Slot>
+      <Slot when={columns}>
       <Button
         size="icon"
         variant="ghost"
@@ -215,6 +242,8 @@ function ProcessActions({ row }: { row: ProcessRow }) {
       >
         <Square className="size-3.5" />
       </Button>
+      </Slot>
+      <Slot when={columns}>
       <Button
         size="icon"
         variant="ghost"
@@ -224,12 +253,20 @@ function ProcessActions({ row }: { row: ProcessRow }) {
       >
         <ScrollText className="size-3.5" />
       </Button>
+      </Slot>
     </span>
   );
 }
 
 /** The three process rows, shared by the header menu and the collapsed rail. */
-export function NodeProcessList({ className }: { className?: string }) {
+export function NodeProcessList({
+  className,
+  columns,
+}: {
+  className?: string;
+  /** Fixed columns per action: right for the wide detail panel. */
+  columns?: boolean;
+}) {
   const { t } = useI18n();
   const { backend, runtime, jobs, hasAgent, busy, backendId } = useCurrent();
   const { config } = useRuntimeFormEntry(backendId);
@@ -285,80 +322,9 @@ export function NodeProcessList({ className }: { className?: string }) {
               </span>
             )}
           </span>
-          <ProcessActions row={row} />
+          <ProcessActions row={row} columns={columns} />
         </div>
       ))}
     </div>
-  );
-}
-
-/**
- * Header surface: one chip that reports the node's inference state and opens
- * the process list. The commands live inside it rather than on the bar, so
- * the page that configures a process can own the labelled button without a
- * second unlabelled copy hovering above it.
- */
-export function NodeProcessMenu() {
-  const { t } = useI18n();
-  const { backend, runtime } = useCurrent();
-  const model = modelName(runtime);
-  const unreachable = !backend?.reachable;
-  const tone: StatusTone = unreachable
-    ? "bad"
-    : runtime?.status === "ready"
-      ? "ok"
-      : runtime?.status === "error"
-        ? "bad"
-        : runtime?.status === "starting" || runtime?.status === "stopping"
-          ? "warn"
-          : "idle";
-
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          aria-label={t("process.menu")}
-          className="flex h-7 min-w-0 items-center gap-1.5 rounded-full border border-border bg-muted px-2.5 text-[11.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
-          <StatusDot tone={tone} />
-          <span className="shrink-0">
-            {unreachable
-              ? t("status.unreachable")
-              : t("status.runtimeState", {
-                  state: runtimeStateLabel(t, runtime),
-                })}
-          </span>
-          {model && (
-            <span className="hidden min-w-0 max-w-[180px] truncate border-l border-border pl-1.5 font-mono text-[11px] lg:inline">
-              {model}
-            </span>
-          )}
-          <ChevronsUpDown className="size-3 shrink-0 opacity-70" />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-[340px] p-0">
-        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-          <span className="text-[11px] font-semibold tracking-[0.04em] text-muted-foreground">
-            {t("process.title")}
-          </span>
-          <div className="flex-1" />
-          <span className="min-w-0 truncate text-[11px] text-muted-foreground">
-            {backend?.name ?? "—"}
-          </span>
-        </div>
-        <NodeProcessList />
-        <div className="border-t border-border p-1.5">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full justify-start"
-            onClick={() => navigate("runtime")}
-          >
-            {t("process.openRuntime")}
-          </Button>
-        </div>
-      </PopoverContent>
-    </Popover>
   );
 }
