@@ -8,8 +8,34 @@
 #include <hip/hip_bfloat16.h>
 using bf16 = hip_bfloat16;
 #define __shfl_down_sync(mask, value, delta) __shfl_down(value, delta, 32)
-__host__ __device__ inline float to_float(bf16 x) { return float(x); }
-__host__ __device__ inline bf16 to_bf16(float x) { return bf16(x); }
+// hip_bfloat16 is only a minimal POD when this header is compiled by a regular
+// host compiler (rather than hipcc), so its C++ conversion operators are not
+// available there.  Convert through the public bit representation so the same
+// helpers work in both host-only translation units and HIP kernels.
+__host__ __device__ inline float to_float(bf16 x) {
+  union {
+    unsigned int bits;
+    float value;
+  } converted = {static_cast<unsigned int>(x.data) << 16};
+  return converted.value;
+}
+__host__ __device__ inline bf16 to_bf16(float x) {
+  union {
+    float value;
+    unsigned int bits;
+  } converted = {x};
+
+  // Round finite values to nearest-even and retain a non-zero NaN payload,
+  // matching ROCm's hip_bfloat16(float) conversion.
+  if ((converted.bits & 0x7f800000u) != 0x7f800000u)
+    converted.bits += 0x7fffu + ((converted.bits >> 16) & 1u);
+  else if (converted.bits & 0xffffu)
+    converted.bits |= 0x10000u;
+
+  bf16 result{};
+  result.data = static_cast<decltype(result.data)>(converted.bits >> 16);
+  return result;
+}
 #else
 #include <cuda_bf16.h>
 #include <cuda_runtime.h>
