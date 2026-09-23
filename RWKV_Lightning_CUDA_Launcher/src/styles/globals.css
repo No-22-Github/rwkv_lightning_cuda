@@ -216,9 +216,10 @@
 }
 
 @layer components {
-  /* Memory held by a process that is not the inference service. Pitch and
-     stroke are sized for the rail's 11px cells: at 1.6px/4px the stripes read
-     as three fat bars rather than a texture, so they are thin and tight. */
+  /* Memory held by a process that is not the inference service: the sheet's
+     hatch, ink on the cell's grey track. Pitch and stroke suit the rail's
+     12px cells — at 1.6px/4px the stripes read as three fat bars rather than
+     a texture. */
   .hatch-foreign {
     background-image: repeating-linear-gradient(
       45deg,

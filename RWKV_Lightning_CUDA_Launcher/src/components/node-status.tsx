@@ -1,5 +1,5 @@
 import { Cpu } from "lucide-react";
-import { Badge, StatusDot, type StatusTone } from "@/components/ui/badge";
+import { Badge, type StatusTone } from "@/components/ui/badge";
 import { Notice } from "@/components/ui/primitives";
 import { formatGigabytePair, percent } from "@/lib/format";
 import type { MessageKey } from "@/lib/i18n";
@@ -181,12 +181,22 @@ export function CapabilityBadges({
  * memory bar under it, temperature and power on the footer line. The full
  * NVML name only fits on wide cards, so it is the part allowed to truncate.
  */
-export function GpuCard({ gpu }: { gpu: GpuMetric }) {
+export function GpuCard({
+  gpu,
+  owned,
+}: {
+  gpu: GpuMetric;
+  owned: Set<number>;
+}) {
   const used = percent(gpu.memory_used_bytes, gpu.memory_total_bytes);
   const utilization = gpu.utilization_percent;
-  const hot = utilization !== undefined && utilization > 85;
   return (
-    <div className="rounded-lg border border-border bg-background px-2.5 py-2">
+    <div
+      className={cn(
+        "rounded-lg bg-background px-2.5 py-2 ring-1",
+        attentionRing(gpu),
+      )}
+    >
       <div className="flex items-baseline gap-2">
         <span className="shrink-0 font-mono text-[12px] font-semibold">
           #{gpu.index}
@@ -197,17 +207,13 @@ export function GpuCard({ gpu }: { gpu: GpuMetric }) {
         >
           {compactGpuName(gpu.name)}
         </span>
-        <span className="flex shrink-0 items-center gap-1.5 font-mono text-[11.5px] tabular-nums">
-          <StatusDot tone={hot ? "warn" : "ok"} />
+        <span className="shrink-0 font-mono text-[11.5px] tabular-nums">
           {utilization !== undefined ? `${utilization}%` : "—"}
         </span>
       </div>
       <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
         <div
-          className={cn(
-            "h-full rounded-full",
-            used > 90 ? "bg-destructive" : hot ? "bg-warning" : "bg-success",
-          )}
+          className={cn("h-full rounded-full", memoryBar(gpu, owned))}
           style={{ width: `${used}%` }}
         />
       </div>
@@ -216,7 +222,7 @@ export function GpuCard({ gpu }: { gpu: GpuMetric }) {
           {formatGigabytePair(gpu.memory_used_bytes, gpu.memory_total_bytes)}
         </span>
         <span className="shrink-0">
-          {gpu.temperature_c !== undefined ? `${gpu.temperature_c}°C` : "—"}
+          <Temperature gpu={gpu} />
           {" · "}
           {gpu.power_watts !== undefined ? `${gpu.power_watts}W` : "—"}
         </span>
@@ -226,11 +232,41 @@ export function GpuCard({ gpu }: { gpu: GpuMetric }) {
 }
 
 /**
+ * The memory bar's fill: ink while the inference service holds it, grey when
+ * something else does, and pale while the card is only holding memory rather
+ * than computing — the same three readings the rail's cells give, so a bar and
+ * a cell never disagree about the same card. The hatch marks the same thing as
+ * the grey where there is room to draw it.
+ */
+function memoryBar(gpu: GpuMetric, owned: Set<number>) {
+  return cn(
+    owned.has(gpu.index) ? "bg-primary" : "bg-muted-foreground",
+    isBusy(gpu) ? "opacity-100" : "opacity-30",
+  );
+}
+
+/** Temperature, amber past the same 85°C line the cells' ring warns at. */
+function Temperature({ gpu }: { gpu: GpuMetric }) {
+  const temp = gpu.temperature_c;
+  if (temp === undefined) return <>—</>;
+  return (
+    <span className={temp >= 85 ? "text-warning" : undefined}>{temp}°C</span>
+  );
+}
+
+/**
  * One compact per-GPU row: utilization headline, memory bar, memory/temp/
  * power line. Shared by the rail's collapsed peek and the expanded switcher
  * card (the mockup renders the identical block in both places).
  */
-export function GpuMiniRows({ metrics }: { metrics: MetricsResponse }) {
+export function GpuMiniRows({
+  metrics,
+  owned,
+}: {
+  metrics: MetricsResponse;
+  /** Cards whose memory belongs to the runtime; see ownedDevices. */
+  owned: Set<number>;
+}) {
   return (
     // minmax(0,1fr): an implicit auto column sizes to the nowrap name's
     // max-content and pushes the utilization/temp columns out of the card.
@@ -250,10 +286,7 @@ export function GpuMiniRows({ metrics }: { metrics: MetricsResponse }) {
             </div>
             <div className="mt-1.5 h-[5px] overflow-hidden rounded-full bg-muted">
               <div
-                className={cn(
-                  "h-[5px] rounded-full",
-                  utilization > 85 ? "bg-warning" : "bg-success",
-                )}
+                className={cn("h-[5px] rounded-full", memoryBar(gpu, owned))}
                 style={{ width: `${used}%` }}
               />
             </div>
@@ -270,10 +303,8 @@ export function GpuMiniRows({ metrics }: { metrics: MetricsResponse }) {
                 )}
               </span>
               <span className="shrink-0">
-                {gpu.temperature_c !== undefined
-                  ? `${gpu.temperature_c}°C`
-                  : "—"}{" "}
-                · {gpu.power_watts !== undefined ? `${gpu.power_watts}W` : "—"}
+                <Temperature gpu={gpu} /> ·{" "}
+                {gpu.power_watts !== undefined ? `${gpu.power_watts}W` : "—"}
               </span>
             </div>
           </div>
@@ -456,13 +487,17 @@ export function GpuList({
   t: TFn;
 }) {
   if (metrics?.available && metrics.gpus.length > 0) {
+    const owned = ownedDevices(
+      runtime,
+      metrics.gpus.map((gpu) => gpu.index),
+    );
     return (
       // Auto-fill columns: the card is legible from ~190px, so a full-width
       // panel tiles four across on a laptop and more on a workstation. An
       // 8-GPU box is then two rows, not a screen and a half of scrolling.
       <div className="grid grid-cols-[repeat(auto-fill,minmax(190px,1fr))] gap-2">
         {metrics.gpus.map((gpu) => (
-          <GpuCard key={gpu.index} gpu={gpu} />
+          <GpuCard key={gpu.index} gpu={gpu} owned={owned} />
         ))}
       </div>
     );

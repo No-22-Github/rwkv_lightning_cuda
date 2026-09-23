@@ -1,11 +1,10 @@
-import { ChevronsUpDown, PanelLeft, Plus, Server } from "lucide-react";
+import { Check, ChevronsUpDown, PanelLeft, Plus, Server } from "lucide-react";
 import { useCurrent } from "@/app/use-current";
 import { NodeProcessList } from "@/components/node-processes";
 import {
   GpuHeatGrid,
   GpuMiniRows,
   gpuUnavailableReason,
-  nodeTone,
   ownedDevices,
   runtimeHint,
   runtimeLabel,
@@ -193,11 +192,10 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
           align="start"
           className="w-[320px] p-1.5"
         >
-          {/* The card is two rows wide, so this is where the node's details
-              live in both states: the same pills, the same rows and the same
-              process list the card is built from. */}
-          <div className="mb-1 rounded-lg border border-border bg-background">
-            <div className="px-2.5 pt-2.5 pb-2">
+          {/* Flat: the popover is already the container, so the node's
+              details, the GPU rows and the process rows sit directly in it,
+              separated by rules rather than by a second rounded box. */}
+          <div className="px-2.5 pt-2.5 pb-2">
               <div className="flex items-center gap-2">
                 <NodeAvatar name={backend?.name} />
                 <span className="min-w-0 flex-1 truncate text-[13px] font-semibold tracking-[-0.01em]">
@@ -219,27 +217,36 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
                   />
                 )}
               </div>
-            </div>
-            <GpuRows
-              metrics={metrics}
-              metricsError={metricsError}
-              backend={backend}
-              t={t}
-              className="max-h-[248px] overflow-x-hidden overflow-y-auto border-t border-border px-2.5 py-2.5"
-            />
-            {/* The same three process rows the header menu shows: one
-                implementation of "start this / stop that", wherever it is
-                reached from. */}
-            <div className="border-t border-border">
-              <NodeProcessList />
-            </div>
           </div>
 
-          <p className="px-2 py-1.5 text-[11px] font-semibold tracking-[0.04em] text-muted-foreground">
+          <GpuRows
+            metrics={metrics}
+            metricsError={metricsError}
+            backend={backend}
+            owned={owned}
+            t={t}
+            className="max-h-[248px] overflow-x-hidden overflow-y-auto border-t border-border px-2.5 py-2.5"
+          />
+
+          {/* The same three process rows the header menu shows: one
+              implementation of "start this / stop that", wherever it is
+              reached from. */}
+          <div className="border-t border-border">
+            <NodeProcessList />
+          </div>
+
+          <p className="border-t border-border px-2 pt-2 pb-1.5 text-[11px] font-semibold tracking-[0.04em] text-muted-foreground">
             {t("backend.registered")}
           </p>
           {list.map((item) => {
-            const itemTone = nodeTone(item, snapshots[item.id]?.runtime);
+            // The tone the card's own dot uses. A second colour vocabulary for
+            // the same node in the same popover was two answers to one
+            // question; the current node is marked by a check instead.
+            const itemStatus = runtimeStatus(
+              item.reachable,
+              item.kind,
+              snapshots[item.id]?.runtime?.status,
+            );
             return (
               <button
                 key={item.id}
@@ -250,7 +257,7 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
                   item.id === currentId && "bg-accent",
                 )}
               >
-                <StatusDot tone={itemTone} />
+                <StatusDot tone={itemStatus.tone} />
                 <span className="block min-w-0">
                   <span className="block truncate text-[13px] font-medium">
                     {backendLabel(t, item)}
@@ -259,7 +266,13 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
                     {item.base_url}
                   </span>
                 </span>
-                <span className="shrink-0 text-[11px] text-muted-foreground">
+                <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+                  {item.id === currentId && (
+                    <Check
+                      aria-hidden="true"
+                      className="size-3 text-foreground"
+                    />
+                  )}
                   {item.reachable
                     ? formatRelativeTime(item.last_probe)
                     : t("status.unreachable")}
@@ -332,19 +345,21 @@ function GpuRows({
   metrics,
   metricsError,
   backend,
+  owned,
   t,
   className,
 }: {
   metrics: MetricsResponse | undefined;
   metricsError: string | undefined;
   backend: BackendView | undefined;
+  owned: Set<number>;
   t: TFn;
   className?: string;
 }) {
   if (metrics?.available && metrics.gpus.length > 0) {
     return (
       <div className={className}>
-        <GpuMiniRows metrics={metrics} />
+        <GpuMiniRows metrics={metrics} owned={owned} />
       </div>
     );
   }
