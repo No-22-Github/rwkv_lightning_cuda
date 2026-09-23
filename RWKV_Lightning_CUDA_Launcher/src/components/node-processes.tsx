@@ -5,6 +5,7 @@ import {
   ScrollText,
   Square,
 } from "lucide-react";
+import type { ReactNode } from "react";
 import { useCurrent } from "@/app/use-current";
 import { modelName, runtimeStateLabel } from "@/components/node-status";
 import { runtimeButtonState } from "@/components/runtime-controls";
@@ -140,6 +141,20 @@ export function nodeProcessRows(
   return rows;
 }
 
+/**
+ * One action slot. The four actions get four fixed columns, so a process that
+ * does not offer one leaves its column empty instead of packing the rest to
+ * the right — which is how training's Stop ended up under the runtime's
+ * Restart.
+ */
+function Slot({ children }: { children?: ReactNode }) {
+  return children ? (
+    <>{children}</>
+  ) : (
+    <span aria-hidden="true" className="size-7" />
+  );
+}
+
 function ProcessActions({ row }: { row: ProcessRow }) {
   const { t } = useI18n();
   const { backendId } = useCurrent();
@@ -149,72 +164,80 @@ function ProcessActions({ row }: { row: ProcessRow }) {
 
   const nodes = () => useNodes.getState();
   return (
-    <span className="flex shrink-0 items-center gap-0.5">
-      {row.startable && (
+    <span className="grid shrink-0 grid-cols-4 items-center gap-0.5">
+      <Slot>
+        {row.startable && (
+          <Button
+            size="icon"
+            variant="ghost"
+            title={t("common.start")}
+            aria-label={t("common.start")}
+            disabled={row.startDisabled}
+            onClick={() =>
+              void run(
+                () =>
+                  nodes().startRuntime(
+                    backendId,
+                    applyDevice({ ...config }, devices),
+                  ),
+                t("runtime.started"),
+              )
+            }
+          >
+            <Play className="size-3.5" />
+          </Button>
+        )}
+      </Slot>
+      <Slot>
         <Button
           size="icon"
           variant="ghost"
-          title={t("common.start")}
-          aria-label={t("common.start")}
-          disabled={row.startDisabled}
+          title={t("common.stop")}
+          aria-label={t("common.stop")}
+          disabled={row.stopDisabled}
           onClick={() =>
             void run(
               () =>
-                nodes().startRuntime(
-                  backendId,
-                  applyDevice({ ...config }, devices),
-                ),
-              t("runtime.started"),
+                row.key === "runtime"
+                  ? nodes().stopRuntime(backendId)
+                  : nodes().stopJob(backendId, row.key),
+              t("runtime.stopped"),
             )
           }
         >
-          <Play className="size-3.5" />
+          <Square className="size-3.5" />
         </Button>
-      )}
-      <Button
-        size="icon"
-        variant="ghost"
-        title={t("common.stop")}
-        aria-label={t("common.stop")}
-        disabled={row.stopDisabled}
-        onClick={() =>
-          void run(
-            () =>
-              row.key === "runtime"
-                ? nodes().stopRuntime(backendId)
-                : nodes().stopJob(backendId, row.key),
-            t("runtime.stopped"),
-          )
-        }
-      >
-        <Square className="size-3.5" />
-      </Button>
-      {row.startable && (
+      </Slot>
+      <Slot>
+        {row.startable && (
+          <Button
+            size="icon"
+            variant="ghost"
+            title={t("common.restart")}
+            aria-label={t("common.restart")}
+            disabled={row.restartDisabled}
+            onClick={() =>
+              void run(
+                () => nodes().restartRuntime(backendId),
+                t("runtime.restarted"),
+              )
+            }
+          >
+            <RotateCcw className="size-3.5" />
+          </Button>
+        )}
+      </Slot>
+      <Slot>
         <Button
           size="icon"
           variant="ghost"
-          title={t("common.restart")}
-          aria-label={t("common.restart")}
-          disabled={row.restartDisabled}
-          onClick={() =>
-            void run(
-              () => nodes().restartRuntime(backendId),
-              t("runtime.restarted"),
-            )
-          }
+          title={t("logs.open")}
+          aria-label={t("logs.open")}
+          onClick={() => show(row.key)}
         >
-          <RotateCcw className="size-3.5" />
+          <ScrollText className="size-3.5" />
         </Button>
-      )}
-      <Button
-        size="icon"
-        variant="ghost"
-        title={t("logs.open")}
-        aria-label={t("logs.open")}
-        onClick={() => show(row.key)}
-      >
-        <ScrollText className="size-3.5" />
-      </Button>
+      </Slot>
     </span>
   );
 }
