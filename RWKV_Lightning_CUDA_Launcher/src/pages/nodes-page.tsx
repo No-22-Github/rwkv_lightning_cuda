@@ -303,28 +303,32 @@ function NodeDetail({ backend }: { backend: BackendView }) {
             // Two columns as soon as the column is wide enough: the list is
             // then about as tall as the three services beside it. One card
             // keeps the full width, and a narrow column falls back to one.
-            <div
-              className={cn(
-                "grid gap-x-3 gap-y-0.5",
-                gpus.length > 1 && "@min-[30rem]:grid-cols-2",
-              )}
-            >
-              {gpus.map((gpu, index) => (
-                <GpuRow
-                  key={gpu.index}
-                  gpu={gpu}
-                  owned={owned}
-                  // The second column carries the rule between the columns —
-                  // under the same query, so the one-column fallback has no
-                  // stray edge on its left.
-                  className={cn(
-                    gpus.length > 1 &&
-                      index % 2 === 1 &&
-                      "@min-[30rem]:border-l @min-[30rem]:border-border @min-[30rem]:pl-3",
-                  )}
+            // One rule down the middle, drawn once: a border per row would be
+            // a segment per row, with the row gap and the rounding showing
+            // through. It lives outside the scroller so it stays put while the
+            // list moves under it.
+            <span className="relative block">
+              {gpus.length > 1 && (
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-y-0 left-1/2 hidden w-px bg-border @min-[30rem]:block"
                 />
-              ))}
-            </div>
+              )}
+              <div
+                className={cn(
+                  // Capped at about the height of the three services beside
+                  // it: one column then scrolls instead of stretching the
+                  // panel, two columns fit eight cards without scrolling at
+                  // all.
+                  "grid max-h-32 gap-x-3 gap-y-0.5 overflow-y-auto",
+                  gpus.length > 1 && "@min-[30rem]:grid-cols-2",
+                )}
+              >
+                {gpus.map((gpu) => (
+                  <GpuRow key={gpu.index} gpu={gpu} owned={owned} />
+                ))}
+              </div>
+            </span>
           ) : (
             <p className="px-2 text-[11px] text-muted-foreground">
               {metrics?.reason ?? t("runtime.gpuNoMetrics")}
