@@ -9,7 +9,6 @@ export type Lang = "zh" | "en";
  */
 const zh = {
   "app.name": "RWKV Lightning",
-  "app.console": "Console",
 
   "common.cancel": "取消",
   "common.confirm": "确认",
@@ -148,7 +147,6 @@ const zh = {
   "runtime.title": "推理服务",
   "runtime.subtitle":
     "在该节点上启动、停止与重启原生推理进程。路径属于节点所在机器。",
-  "runtime.polling": "状态每 1.6s 轮询 /api/v1/runtime",
   "runtime.nodeReachable": "节点可达",
   "runtime.model": "模型",
   "runtime.modelPath": "模型路径",
@@ -517,7 +515,6 @@ export type MessageKey = keyof typeof zh;
 
 const en: Record<MessageKey, string> = {
   "app.name": "RWKV Lightning",
-  "app.console": "Console",
 
   "common.cancel": "Cancel",
   "common.confirm": "Confirm",
@@ -652,7 +649,6 @@ const en: Record<MessageKey, string> = {
   "runtime.title": "Inference service",
   "runtime.subtitle":
     "Start, stop and restart the native inference process on this node. Paths belong to the node's machine.",
-  "runtime.polling": "Polling /api/v1/runtime every 1.6s",
   "runtime.nodeReachable": "Node reachable",
   "runtime.model": "Model",
   "runtime.modelPath": "Model path",

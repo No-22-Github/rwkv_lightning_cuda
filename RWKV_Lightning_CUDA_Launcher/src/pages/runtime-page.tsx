@@ -171,8 +171,8 @@ export function RuntimePage() {
         ) : null}
         <div className="flex-1" />
         {/* The strip itself has no horizontal gap — the connectors provide it
-            — so this trailing pair brings its own. */}
-        <span className="flex items-center gap-2.5 pl-3.5">
+            — so this trailing control brings its own. */}
+        <span className="flex items-center pl-3.5">
           <Button
             size="xs"
             onClick={() => useLogDock.getState().show("runtime")}
@@ -180,9 +180,6 @@ export function RuntimePage() {
             <ScrollText className="size-3.5" />
             {t("runtime.logs")}
           </Button>
-          <span className="text-[11.5px] text-muted-foreground">
-            {t("runtime.polling")}
-          </span>
         </span>
       </div>
 
@@ -365,10 +362,6 @@ export function RuntimePage() {
               {gpuSummary}
             </span>
           )}
-          <div className="flex-1" />
-          <span className="font-mono text-[11px] text-muted-foreground">
-            /api/v1/node/metrics
-          </span>
         </CardHeader>
         <CardContent>
           <GpuList

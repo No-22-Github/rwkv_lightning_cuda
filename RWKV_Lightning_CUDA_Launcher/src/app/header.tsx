@@ -38,9 +38,6 @@ export function Header() {
         <span className="text-[13.5px] font-semibold tracking-[-0.01em]">
           {t("app.name")}
         </span>
-        <span className="rounded-[5px] border border-border px-1.5 py-px text-[10.5px] font-medium text-muted-foreground">
-          {t("app.console")}
-        </span>
       </div>
 
       {!inlineTitle && (
