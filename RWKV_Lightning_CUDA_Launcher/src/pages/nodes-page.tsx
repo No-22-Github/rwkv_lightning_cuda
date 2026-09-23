@@ -367,12 +367,15 @@ function GpuRow({
   return (
     <div
       className={cn(
-        "grid grid-cols-[1.75rem_minmax(0,1fr)_2.75rem_3.25rem_3.5rem] items-center gap-x-1.5 rounded-lg px-2 py-1",
+        // Tight fixed columns and no monospace: the numbers set narrower in
+        // the sans face, and every pixel they give up goes to the bar, which
+        // is the one thing here that has to be readable at a glance.
+        "grid grid-cols-[1.25rem_minmax(0,1fr)_2.25rem_2.75rem_3rem] items-center gap-x-1 rounded-lg px-2 py-1",
         className,
       )}
       title={gpu.name}
     >
-      <span className="font-mono text-[11.5px] tabular-nums text-muted-foreground">
+      <span className="text-[11.5px] tabular-nums text-muted-foreground">
         #{gpu.index}
       </span>
       <span className="h-[5px] overflow-hidden rounded-full bg-muted">
@@ -387,20 +390,20 @@ function GpuRow({
           {share < 1 && <span className="hatch-foreign flex-1" />}
         </span>
       </span>
-      <span className="text-right font-mono text-[11.5px] tabular-nums">
+      <span className="text-right text-[11.5px] tabular-nums">
         {gpu.utilization_percent !== undefined
           ? `${gpu.utilization_percent}%`
           : "—"}
       </span>
       <span
         className={cn(
-          "text-right font-mono text-[11.5px] tabular-nums",
+          "text-right text-[11.5px] tabular-nums",
           temp !== undefined && temp > 85 && "text-warning",
         )}
       >
         {temp !== undefined ? `${temp}°C` : "—"}
       </span>
-      <span className="text-right font-mono text-[11.5px] tabular-nums text-muted-foreground">
+      <span className="text-right text-[11.5px] tabular-nums text-muted-foreground">
         {gpu.power_watts !== undefined ? `${gpu.power_watts}W` : "—"}
       </span>
     </div>
