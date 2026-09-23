@@ -357,15 +357,30 @@ export function GpuMiniRows({
 export function GpuHeatGrid({
   gpus,
   owned,
+  wide,
+  className,
 }: {
   gpus: GpuMetric[];
   /** Cards whose memory belongs to the inference runtime; see ownedDevices. */
   owned: Set<number>;
+  /**
+   * Four across instead of two: the open rail card has the width for it, and
+   * a flat block sits better beside the numbers than a tall one. Collapsed,
+   * only two columns fit in the 44px card.
+   */
+  wide?: boolean;
+  className?: string;
 }) {
   if (gpus.length === 0) return null;
   const alone = gpus.length === 1;
   return (
-    <span className="grid shrink-0 grid-cols-2 auto-rows-[16px] gap-0.5">
+    <span
+      className={cn(
+        "grid shrink-0 gap-0.5",
+        wide ? "grid-cols-4 grid-rows-2" : "grid-cols-2 grid-rows-4",
+        className,
+      )}
+    >
       {gpus.map((gpu) => {
         const split = memorySplit(gpu, owned);
         return (
@@ -377,7 +392,11 @@ export function GpuHeatGrid({
             // A single card would otherwise be one cell in the corner of the
             // block: let it fill the block, so a one-GPU node reads as one
             // gauge with the whole 70px of travel.
-            alone ? "col-span-2 row-span-4 w-[26px]" : "h-4 w-3",
+            alone
+              ? wide
+                ? "col-span-4 row-span-2 w-[54px]"
+                : "col-span-2 row-span-4 w-[26px]"
+              : "h-4 w-3",
             attentionRing(gpu),
           )}
         >

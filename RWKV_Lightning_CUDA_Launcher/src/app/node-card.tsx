@@ -148,11 +148,24 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
                 side off, it does not take a row away. */}
             <span className="mt-2 flex items-center gap-2">
               {gpus.length > 0 ? (
-                <GpuHeatGrid gpus={gpus} owned={owned} />
+                // Keyed on the shape: CSS cannot interpolate a grid between
+                // two and four tracks, so the change of shape gets a fade
+                // rather than a morph.
+                <GpuHeatGrid
+                  key={collapsed ? "tall" : "wide"}
+                  gpus={gpus}
+                  owned={owned}
+                  wide={!collapsed}
+                  className="animate-fade-in"
+                />
               ) : (
                 // Keeps the block's footprint on a node whose metrics have not
                 // arrived yet, so the card does not resize under the pointer.
-                <span className="h-[70px] w-[26px]" />
+                <span
+                  className={cn(
+                    collapsed ? "h-[70px] w-[26px]" : "h-[34px] w-[54px]",
+                  )}
+                />
               )}
               <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                 {/* Label muted, value foreground, both in the sans face with
