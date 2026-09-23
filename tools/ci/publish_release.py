@@ -126,6 +126,27 @@ class Publisher:
             return release
         return retry(ensure)
 
+    def pin_tag(self, release_id):
+        """Re-assert the real tag on a release and confirm it stuck.
+
+        GitHub rewrites a release's tag_name to an "untagged-<hex>" placeholder
+        when a PATCH touches a draft whose target tag ref already exists —
+        observed on body updates right after ensure_tag created the ref, and
+        that placeholder is what published the old duplicate releases. The
+        rewrite can strike any PATCH, so pin right before the publish flip and
+        verify again after it; the release must never land on a placeholder.
+        """
+        def pin():
+            current = self.api(f"releases/{release_id}")
+            if current.get("tag_name") != self.tag:
+                self.api(f"releases/{release_id}", {"tag_name": self.tag}, "PATCH")
+        retry(pin)
+        final = retry(lambda: self.api(f"releases/{release_id}"))
+        if final.get("tag_name") != self.tag:
+            raise RuntimeError(
+                f"Release {release_id} stayed on tag {final.get('tag_name')!r} instead of {self.tag}"
+            )
+
     def publish(self, directory):
         assets = sorted(p for p in directory.iterdir()
                         if p.name.endswith((".zip", ".tar.gz", ".sha256")))
@@ -134,12 +155,6 @@ class Publisher:
         self.ensure_tag()
         release = self.ensure_draft()
         release_path = f"releases/{release['id']}"
-        # Drafts can carry an "untagged-<hex>" placeholder tag_name when the
-        # tag ref is not visible at draft time. Carry the real tag over before
-        # publishing, or the release lands on the placeholder tag and the next
-        # run publishes this version again.
-        if release.get("tag_name") != self.tag:
-            retry(lambda: self.api(release_path, {"tag_name": self.tag}, "PATCH"))
         if not release.get("body"):
             try:
                 notes = retry(lambda: self.api("releases/generate-notes", {
@@ -152,8 +167,10 @@ class Publisher:
         for asset in assets:
             print(f"Uploading {asset.name}", flush=True)
             self.upload_asset(release, asset)
+        self.pin_tag(release["id"])
         # PATCH is idempotent, including when publishing succeeded but its response was lost.
         retry(lambda: self.api(release_path, {"draft": False, "make_latest": "true"}, "PATCH"))
+        self.pin_tag(release["id"])
         print(f"Published {self.tag}")
 
 

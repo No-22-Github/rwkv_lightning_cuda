@@ -85,13 +85,24 @@ class PublishTests(unittest.TestCase):
         with patch("publish_release.gh", return_value=""):
             self.assertIsNone(self.publisher.api("releases/assets/7", method="DELETE"))
 
-    def run_publish(self, upload_failure=False, draft_tag_name="v1.4.1"):
+    def run_publish(self, upload_failure=False, draft_tag_name="v1.4.1", api=None):
         calls = []
-        def api(path, payload=None, method="GET"):
-            calls.append((path, payload, method))
-            if path == "releases/generate-notes":
-                raise GitHubError("HTTP 500")
-            return {}
+        state = {"tag_name": draft_tag_name}
+        if api is None:
+            def api(path, payload=None, method="GET"):
+                calls.append((path, payload, method))
+                if path == "releases/generate-notes":
+                    raise GitHubError("HTTP 500")
+                if path == "releases/42":
+                    if method == "GET":
+                        return dict(state)
+                    state.update(payload or {})
+                return {}
+        else:
+            base_api = api
+            def api(path, payload=None, method="GET"):
+                calls.append((path, payload, method))
+                return base_api(path, payload, method)
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
             (directory / "package.zip").write_bytes(b"package")
@@ -125,8 +136,70 @@ class PublishTests(unittest.TestCase):
 
     def test_notes_failure_does_not_prevent_publication(self):
         calls = self.run_publish()
-        self.assertEqual(calls[-1], ("releases/42", {"draft": False, "make_latest": "true"}, "PATCH"))
+        flip = ("releases/42", {"draft": False, "make_latest": "true"}, "PATCH")
+        self.assertIn(flip, calls)
         self.assertTrue(any("body" in (payload or {}) for _, payload, _ in calls))
+
+    def test_body_patch_placeholder_rewrite_is_pinned_before_flip(self):
+        # GitHub rewrites a draft's tag_name to an "untagged-<hex>" placeholder
+        # when a PATCH touches the draft while the tag ref already exists; the
+        # pin after the notes update must restore the real tag before the flip.
+        tag = {"name": "v1.4.1"}
+        def api(path, payload=None, method="GET"):
+            if path == "releases/generate-notes":
+                raise GitHubError("HTTP 500")
+            if path == "releases/42":
+                if method == "GET":
+                    return {"tag_name": tag["name"]}
+                if payload and "tag_name" in payload:
+                    tag["name"] = payload["tag_name"]
+                elif payload and "body" in payload:
+                    tag["name"] = "untagged-rewrite1"
+            return {}
+        calls = self.run_publish(api=api)
+        index = lambda pred: next(i for i, c in enumerate(calls) if pred(*c))
+        body = index(lambda p, pay, m: p == "releases/42" and m == "PATCH" and "body" in (pay or {}))
+        pin = index(lambda p, pay, m: m == "PATCH" and pay and "tag_name" in pay)
+        flip = index(lambda p, pay, m: m == "PATCH" and pay and pay.get("draft") is False)
+        self.assertLess(body, pin)
+        self.assertLess(pin, flip)
+        self.assertEqual(calls[pin][2], "PATCH")
+        self.assertEqual(calls[pin][1]["tag_name"], "v1.4.1")
+
+    def test_placeholder_after_flip_is_repaired_after_publish(self):
+        # The rewrite can also strike the publish flip itself; the post-publish
+        # pin must re-associate the release with the real tag instead of
+        # leaving it where the version check can never find it.
+        rewritten = {"done": False}
+        def api(path, payload=None, method="GET"):
+            if path == "releases/generate-notes":
+                raise GitHubError("HTTP 500")
+            if path == "releases/42":
+                if method == "GET":
+                    return {"tag_name": "untagged-flip" if rewritten["done"] else "v1.4.1"}
+                if payload and payload.get("draft") is False:
+                    rewritten["done"] = True
+                elif payload and "tag_name" in payload:
+                    rewritten["done"] = False
+            return {}
+        calls = self.run_publish(api=api)
+        index = lambda pred: next(i for i, c in enumerate(calls) if pred(*c))
+        flip = index(lambda p, pay, m: m == "PATCH" and pay and pay.get("draft") is False)
+        heal = index(lambda p, pay, m: m == "PATCH" and pay and "tag_name" in pay)
+        self.assertLess(flip, heal)
+        self.assertEqual(calls[heal][1]["tag_name"], "v1.4.1")
+
+    def test_placeholder_that_cannot_be_pinned_fails_the_publish(self):
+        # Refuse to print success when the release would stay on a placeholder
+        # tag; that binding is what made every push republish the version.
+        def api(path, payload=None, method="GET"):
+            if path == "releases/generate-notes":
+                raise GitHubError("HTTP 500")
+            if path == "releases/42" and method == "GET":
+                return {"tag_name": "untagged-stuck"}
+            return {}
+        with self.assertRaisesRegex(RuntimeError, "stayed on tag"):
+            self.run_publish(api=api)
 
     def test_upload_failure_keeps_release_draft(self):
         calls = self.run_publish(upload_failure=True)
