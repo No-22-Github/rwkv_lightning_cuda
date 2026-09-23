@@ -417,8 +417,10 @@ function GpuRow({
   const share = split.used > 0 ? split.own / split.used : 0;
   const temp = gpu.temperature_c;
   // Idle rows recede as a whole — no colour needed to tell busy from idle. The
-  // one colour allowed is the card's number, and only while it is idle.
-  const number = idle ? "text-success" : "text-muted-foreground";
+  // one colour allowed is the card's number, and only while it is idle. Blue,
+  // not the green the status dots use for "the service is running": one colour
+  // should not carry two meanings.
+  const number = idle ? "text-info" : "text-muted-foreground";
   const faded = idle ? "text-muted-foreground" : "";
   return (
     <div
