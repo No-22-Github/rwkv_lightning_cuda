@@ -217,13 +217,13 @@
 
 @layer components {
   /* Memory held by a process that is not the inference service. Pitch and
-     stroke are sized for the rail's 11px cells: a wider stripe reads as lines
-     rather than as a texture at that size. */
+     stroke are sized for the rail's 11px cells: at 1.6px/4px the stripes read
+     as three fat bars rather than a texture, so they are thin and tight. */
   .hatch-foreign {
     background-image: repeating-linear-gradient(
       45deg,
-      var(--primary) 0 1.6px,
-      transparent 1.6px 4px
+      var(--primary) 0 1px,
+      transparent 1px 2.5px
     );
   }
 

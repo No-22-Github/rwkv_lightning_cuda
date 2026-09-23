@@ -11,7 +11,7 @@ import {
   runtimeLabel,
   runtimeStatus,
 } from "@/components/node-status";
-import { StatusDot, StatusPill } from "@/components/ui/badge";
+import { StatusDot, StatusPill, type StatusTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -125,7 +125,11 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
                 above it sits on, which also centres it over the 24px-wide heat
                 block below. */}
             <span className="flex items-center gap-2 pl-1">
-              <NodeAvatar name={backend?.name} />
+              <NodeAvatar
+                name={backend?.name}
+                tone={status?.tone}
+                showBadge={collapsed}
+              />
               <span
                 className={cn(
                   "min-w-0 flex-1 truncate text-[13px] font-semibold tracking-[-0.01em] transition-opacity",
@@ -142,21 +146,39 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
               />
             </span>
 
-            {/* Avatar above, heat block below, the same two rows in both
-                states. The status dot sits under the block rather than on the
-                avatar's corner: it is the one place a 44px card has room for
-                it, and the words next to it only fit while the rail is open. */}
-            <span className="mt-2 flex items-center gap-2">
-              <span className="flex w-6 shrink-0 flex-col items-center gap-1.5">
-                {gpus.length > 0 ? (
-                  <GpuHeatGrid gpus={gpus} owned={owned} />
-                ) : (
-                  // Keeps the status dot at the same height on a node whose
-                  // metrics have not arrived yet.
-                  <span className="h-[66px]" />
+            {/* Avatar above, heat block below, the same rows in both states.
+                The service state is the card's subtitle — its dot and its
+                words together, right under the node's name. The dot fades to
+                the avatar's corner as the rail closes (see NodeAvatar): with
+                no room for the words, a lone dot explains nothing. */}
+            <span className="mt-1.5 flex items-center gap-1.5 pl-1">
+              {status && (
+                <StatusDot
+                  tone={status.tone}
+                  className={cn(
+                    "transition-opacity duration-200",
+                    collapsed && "opacity-0",
+                  )}
+                />
+              )}
+              <span
+                className={cn(
+                  "min-w-0 flex-1 truncate text-[11.5px] text-muted-foreground transition-opacity",
+                  collapsed && "opacity-0",
                 )}
-                {status && <StatusDot tone={status.tone} />}
+              >
+                {statusLabel}
               </span>
+            </span>
+
+            <span className="mt-2 flex items-center gap-2">
+              {gpus.length > 0 ? (
+                <GpuHeatGrid gpus={gpus} owned={owned} />
+              ) : (
+                // Keeps the block's footprint on a node whose metrics have not
+                // arrived yet, so the card does not resize under the pointer.
+                <span className="h-[66px] w-6" />
+              )}
               <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                 <span
                   className={cn(
@@ -173,14 +195,6 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
                   )}
                 >
                   {memoryLine}
-                </span>
-                <span
-                  className={cn(
-                    "truncate text-[11.5px] text-muted-foreground transition-opacity",
-                    collapsed && "opacity-0",
-                  )}
-                >
-                  {statusLabel}
                 </span>
               </span>
             </span>
@@ -299,16 +313,37 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
 
 /**
  * The node's identity in one glyph: its initial in a tile, sized like the nav
- * icons above. The tile carries no status badge of its own — the card's
- * status dot has the words next to it, and the popover's pill repeats it.
+ * icons above. While the rail is collapsed the service state has no words to
+ * sit next to, so its dot rides on this tile's corner instead — the two fade
+ * through each other as the rail opens, which is how one dot reads as moving
+ * between its label and the node's icon.
  */
-function NodeAvatar({ name }: { name?: string }) {
+function NodeAvatar({
+  name,
+  tone,
+  showBadge,
+}: {
+  name?: string;
+  tone?: StatusTone;
+  showBadge?: boolean;
+}) {
   return (
-    <span className="flex size-4 shrink-0 items-center justify-center rounded-[5px] bg-muted text-[9.5px] font-semibold text-muted-foreground">
-      {name ? (
-        name.trim().slice(0, 1).toUpperCase()
-      ) : (
-        <Server className="size-2.5" />
+    <span className="relative shrink-0">
+      <span className="flex size-4 items-center justify-center rounded-[5px] bg-muted text-[9.5px] font-semibold text-muted-foreground">
+        {name ? (
+          name.trim().slice(0, 1).toUpperCase()
+        ) : (
+          <Server className="size-2.5" />
+        )}
+      </span>
+      {tone && (
+        <StatusDot
+          tone={tone}
+          className={cn(
+            "absolute -top-1 -right-1 ring-2 ring-background transition-opacity duration-200",
+            showBadge ? "opacity-100" : "opacity-0",
+          )}
+        />
       )}
     </span>
   );
