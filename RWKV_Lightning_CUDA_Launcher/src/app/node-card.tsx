@@ -112,12 +112,12 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
     <div className="overflow-hidden rounded-xl border border-border bg-background">
       <Popover>
         <PopoverTrigger asChild>
-          {/* 9px of padding centres the card's 24px content column — the
-              width of the heat block — in the 44px card. */}
+          {/* 8px of padding centres the card's 26px content column — the width
+              of the heat block and the node tile — in the 44px card. */}
           <button
             type="button"
             title={hint}
-            className="block w-full overflow-hidden px-[9px] py-2.5 text-left transition-colors hover:bg-muted"
+            className="block w-full overflow-hidden px-2 py-2.5 text-left transition-colors hover:bg-muted"
             aria-label={t("backend.registered")}
             aria-haspopup="dialog"
           >
@@ -137,7 +137,10 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
                 </span>
                 <span
                   className={cn(
-                    "truncate text-[11.5px] leading-tight text-muted-foreground transition-opacity",
+                    // -2px: the leading above the name and below the state is
+                    // the only air in the pair, and pulling the two lines
+                    // together is what keeps the tile beside them square.
+                    "-mt-0.5 truncate text-[11.5px] leading-tight text-muted-foreground transition-opacity",
                     collapsed && "opacity-0",
                   )}
                 >
@@ -161,7 +164,7 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
               ) : (
                 // Keeps the block's footprint on a node whose metrics have not
                 // arrived yet, so the card does not resize under the pointer.
-                <span className="h-[66px] w-6" />
+                <span className="h-[70px] w-[26px]" />
               )}
               <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                 <span
@@ -298,15 +301,16 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
 /**
  * The node's identity in one glyph: its initial in a tile. It stretches to
  * the height of the name and the service state beside it, so the tile reads
- * as one block with the two lines rather than as a 16px square floating in
- * front of them — and its width matches the heat block below. The status dot
- * rides this tile's corner in both rail states: it belongs to the node, and
- * while the rail is closed it is the only thing that carries the tone.
+ * as one block with the two lines; 26px wide against ~29px tall keeps it
+ * square-ish, and a 6px radius keeps it a rounded rectangle rather than the
+ * tall ellipse a larger radius made of it. The status dot rides this tile's
+ * corner in both rail states: it belongs to the node, and while the rail is
+ * closed it is the only thing that carries the tone.
  */
 function NodeAvatar({ name, tone }: { name?: string; tone?: StatusTone }) {
   return (
-    <span className="relative w-6 shrink-0">
-      <span className="flex h-full min-h-6 w-full items-center justify-center rounded-lg bg-muted text-[12px] font-semibold text-muted-foreground">
+    <span className="relative w-[26px] shrink-0">
+      <span className="flex h-full min-h-6 w-full items-center justify-center rounded-[6px] bg-muted text-[12px] font-semibold text-muted-foreground">
         {name ? (
           name.trim().slice(0, 1).toUpperCase()
         ) : (
