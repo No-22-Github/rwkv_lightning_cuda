@@ -285,8 +285,11 @@ function NodeDetail({ backend }: { backend: BackendView }) {
             each action in its own column. */}
         <NodeProcessList columns className="p-0" />
 
-        <div className="min-w-0">
-          <div className="flex items-baseline gap-2 px-2 pb-2 text-[11px] text-muted-foreground">
+        {/* A container, not a viewport breakpoint: what the card rows need is
+            the width of this column, and that depends on the panel's own
+            layout, not on the window. */}
+        <div className="@container min-w-0">
+          <div className="flex items-baseline gap-2 px-2 pb-1 text-[11px] text-muted-foreground">
             {gpus.length > 0 && (
               <span className="truncate">
                 {t("nodes.gpuHeader", {
@@ -297,7 +300,15 @@ function NodeDetail({ backend }: { backend: BackendView }) {
             )}
           </div>
           {gpus.length > 0 ? (
-            <div className="grid gap-0.5">
+            // Two columns as soon as the column is wide enough: the list is
+            // then about as tall as the three services beside it. One card
+            // keeps the full width, and a narrow column falls back to one.
+            <div
+              className={cn(
+                "grid gap-x-4 gap-y-0.5",
+                gpus.length > 1 && "@min-[30rem]:grid-cols-2",
+              )}
+            >
               {gpus.map((gpu) => (
                 <GpuRow key={gpu.index} gpu={gpu} owned={owned} />
               ))}
@@ -331,7 +342,7 @@ function GpuRow({ gpu, owned }: { gpu: GpuMetric; owned: Set<number> }) {
   const temp = gpu.temperature_c;
   return (
     <div
-      className="grid grid-cols-[2rem_minmax(0,1fr)_3.5rem_4.5rem_4.5rem] items-center gap-x-2.5 rounded-lg px-2 py-1.5"
+      className="grid grid-cols-[1.75rem_minmax(0,1fr)_2.75rem_3.25rem_3.5rem] items-center gap-x-1.5 rounded-lg px-2 py-1"
       title={gpu.name}
     >
       <span className="font-mono text-[11.5px] tabular-nums text-muted-foreground">
