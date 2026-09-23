@@ -225,12 +225,13 @@ export function RailToggle() {
   const toggle = useRail((s) => s.toggle);
   return (
     <Button
+      variant="ghost"
       size="icon-sm"
-      variant="outline"
+      className="size-9"
       title={t("header.toggleSidebar")}
       onClick={toggle}
     >
-      <PanelLeft className="size-3.5" />
+      <PanelLeft className="size-4" />
     </Button>
   );
 }

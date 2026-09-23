@@ -27,7 +27,7 @@ export function Header() {
     <header className="flex h-13 shrink-0 items-center gap-3 border-b border-border bg-card px-3.5">
       <RailToggle />
 
-      <div className="flex h-7 items-center gap-2 border-r border-border pr-3">
+      <div className="flex h-7 items-center gap-2">
         {/* Black swan mark; invert keeps the silhouette visible on the dark
             header (the source asset is a black-on-transparent cutout). */}
         <img

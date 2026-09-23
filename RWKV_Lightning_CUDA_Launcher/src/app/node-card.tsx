@@ -6,6 +6,7 @@ import {
   GpuMiniRows,
   gpuUnavailableReason,
   nodeTone,
+  ownedDevices,
   runtimeHint,
   runtimeLabel,
   runtimeStatus,
@@ -102,6 +103,10 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
           pair: formatGigabytePair(usedBytes, totalBytes, 0),
         })
       : "";
+  const owned = ownedDevices(
+    runtime,
+    gpus.map((gpu) => gpu.index),
+  );
 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-background">
@@ -144,7 +149,7 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
             <span className="mt-2 flex items-center gap-2">
               <span className="flex w-6 shrink-0 flex-col items-center gap-1.5">
                 {gpus.length > 0 ? (
-                  <GpuHeatGrid gpus={gpus} />
+                  <GpuHeatGrid gpus={gpus} owned={owned} />
                 ) : (
                   // Keeps the status dot at the same height on a node whose
                   // metrics have not arrived yet.

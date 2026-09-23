@@ -308,7 +308,14 @@ export function GpuMiniRows({ metrics }: { metrics: MetricsResponse }) {
  * The geometry is fixed on purpose: the rail card keeps this block in both
  * states, so cell size, column count and gap must not depend on rail width.
  */
-export function GpuHeatGrid({ gpus }: { gpus: GpuMetric[] }) {
+export function GpuHeatGrid({
+  gpus,
+  owned,
+}: {
+  gpus: GpuMetric[];
+  /** Cards whose memory belongs to the inference runtime; see ownedDevices. */
+  owned: Set<number>;
+}) {
   if (gpus.length === 0) return null;
   const alone = gpus.length === 1;
   return (
@@ -328,7 +335,11 @@ export function GpuHeatGrid({ gpus }: { gpus: GpuMetric[] }) {
         >
           <span
             className={cn(
-              "absolute inset-x-0 bottom-0 bg-primary",
+              "absolute inset-x-0 bottom-0",
+              // Hatched = held by something that is not the inference service;
+              // solid ink = ours. On a box whose runtime is not running, every
+              // bar is hatched, which is exactly what the memory means there.
+              owned.has(gpu.index) ? "bg-primary" : "hatch-foreign",
               isBusy(gpu) ? "opacity-100" : "opacity-30",
             )}
             style={{ height: `${memoryPercent(gpu)}%` }}
@@ -337,6 +348,35 @@ export function GpuHeatGrid({ gpus }: { gpus: GpuMetric[] }) {
       ))}
     </span>
   );
+}
+
+/**
+ * Which cards' memory belongs to the inference runtime.
+ *
+ * The metrics report per-card totals with no owner, and the launcher injects
+ * the device spec when it spawns the runtime, so that spec is the only
+ * ownership signal there is: memory on a card outside it — or on any card at
+ * all while the runtime is not holding memory — belongs to something else.
+ * A spec that is not a plain index list (GPU UUIDs, MIG selectors) cannot be
+ * matched against metrics indexes, and an empty one means the child inherited
+ * its view from the Agent; both are read as "the runtime owns what this box
+ * shows", which is the reading that does not paint a whole box as foreign.
+ */
+export function ownedDevices(
+  runtime: RuntimeState | undefined,
+  indexes: number[],
+): Set<number> {
+  const holding = runtime
+    ? (["ready", "starting", "running", "stopping"] as string[]).includes(
+        runtime.status,
+      )
+    : false;
+  if (!holding) return new Set();
+  const spec = (runtime?.visible_devices ?? "").trim();
+  if (spec === "") return new Set(indexes);
+  const parsed = spec.split(",").map((part) => Number.parseInt(part.trim(), 10));
+  const usable = parsed.every((n) => Number.isInteger(n) && n >= 0);
+  return new Set(usable ? parsed : indexes);
 }
 
 /** Allocated fraction of the card's memory; clamped — used can exceed total. */
