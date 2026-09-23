@@ -309,8 +309,20 @@ function NodeDetail({ backend }: { backend: BackendView }) {
                 gpus.length > 1 && "@min-[30rem]:grid-cols-2",
               )}
             >
-              {gpus.map((gpu) => (
-                <GpuRow key={gpu.index} gpu={gpu} owned={owned} />
+              {gpus.map((gpu, index) => (
+                <GpuRow
+                  key={gpu.index}
+                  gpu={gpu}
+                  owned={owned}
+                  // The second column carries the rule between the columns —
+                  // under the same query, so the one-column fallback has no
+                  // stray edge on its left.
+                  className={cn(
+                    gpus.length > 1 &&
+                      index % 2 === 1 &&
+                      "@min-[30rem]:border-l @min-[30rem]:border-border @min-[30rem]:pl-3",
+                  )}
+                />
               ))}
             </div>
           ) : (
@@ -336,13 +348,24 @@ function NodeDetail({ backend }: { backend: BackendView }) {
 }
 
 /** One card's row in the detail: number, memory, utilization, temperature, power. */
-function GpuRow({ gpu, owned }: { gpu: GpuMetric; owned: Set<number> }) {
+function GpuRow({
+  gpu,
+  owned,
+  className,
+}: {
+  gpu: GpuMetric;
+  owned: Set<number>;
+  className?: string;
+}) {
   const split = memorySplit(gpu, owned);
   const share = split.used > 0 ? split.own / split.used : 0;
   const temp = gpu.temperature_c;
   return (
     <div
-      className="grid grid-cols-[1.75rem_minmax(0,1fr)_2.75rem_3.25rem_3.5rem] items-center gap-x-1.5 rounded-lg px-2 py-1"
+      className={cn(
+        "grid grid-cols-[1.75rem_minmax(0,1fr)_2.75rem_3.25rem_3.5rem] items-center gap-x-1.5 rounded-lg px-2 py-1",
+        className,
+      )}
       title={gpu.name}
     >
       <span className="font-mono text-[11.5px] tabular-nums text-muted-foreground">
