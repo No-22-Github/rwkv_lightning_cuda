@@ -107,17 +107,19 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
     <div className="overflow-hidden rounded-xl border border-border bg-background">
       <Popover>
         <PopoverTrigger asChild>
-          {/* 13px of padding plus the card's 1px border centres this 16px
-              column in the collapsed card, which is also the 24px icon column
-              every nav icon above it sits on. */}
+          {/* 9px of padding centres the card's 24px content column — the
+              width of the heat block — in the 44px card. */}
           <button
             type="button"
             title={hint}
-            className="block w-full overflow-hidden px-[13px] py-2.5 text-left transition-colors hover:bg-muted"
+            className="block w-full overflow-hidden px-[9px] py-2.5 text-left transition-colors hover:bg-muted"
             aria-label={t("backend.registered")}
             aria-haspopup="dialog"
           >
-            <span className="flex items-center gap-2">
+            {/* 4px in: the avatar lands on the 24px icon column every nav icon
+                above it sits on, which also centres it over the 24px-wide heat
+                block below. */}
+            <span className="flex items-center gap-2 pl-1">
               <NodeAvatar name={backend?.name} />
               <span
                 className={cn(
@@ -138,16 +140,15 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
             {/* Avatar above, heat block below, the same two rows in both
                 states. The status dot sits under the block rather than on the
                 avatar's corner: it is the one place a 44px card has room for
-                it, and the words next to it only fit while the rail is open.
-                Both are centred on the 16px column the avatar sets up. */}
-            <span className="mt-2 flex items-start gap-2">
-              <span className="flex w-4 shrink-0 flex-col items-center gap-1.5">
+                it, and the words next to it only fit while the rail is open. */}
+            <span className="mt-2 flex items-center gap-2">
+              <span className="flex w-6 shrink-0 flex-col items-center gap-1.5">
                 {gpus.length > 0 ? (
                   <GpuHeatGrid gpus={gpus} />
                 ) : (
                   // Keeps the status dot at the same height on a node whose
                   // metrics have not arrived yet.
-                  <span className="h-[34px]" />
+                  <span className="h-[66px]" />
                 )}
                 {status && <StatusDot tone={status.tone} />}
               </span>

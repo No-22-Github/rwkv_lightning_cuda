@@ -284,16 +284,26 @@ export function GpuMiniRows({ metrics }: { metrics: MetricsResponse }) {
 }
 
 /**
- * One cell per GPU, two to a row, so an eight-card box reads as a 2×4 heat
- * grid. The colour is utilization — an idle card stays grey, because a green
- * square for 0% reads as "working" — and the tooltip carries the whole row
- * the compact list used to spell out, so hovering a cell gives the same
- * reading whether the rail is open or collapsed.
+ * One cell per GPU, two to a row, so an eight-card box reads as a 2×4 grid.
+ * Each cell is a gauge, not a square of colour:
+ *
+ * - the track (cell background) is the card's total memory, and the bar
+ *   filling it from the bottom is what is allocated;
+ * - the bar is solid while the card is computing and faded (~0.28) while it is
+ *   only holding memory;
+ * - colour is reserved for "needs handling": the outline turns amber near a
+ *   limit and red at it. Nothing else in the cell is coloured, so a coloured
+ *   cell always means the same thing.
+ *
+ * The legend also has a hatch for memory held by an outside process. The
+ * metrics endpoint reports per-card totals only — nothing says who owns the
+ * pages — and a 7px cell cannot resolve stripes anyway, so the channel is
+ * left unused rather than guessed at.
  *
  * Two columns, not four: the block has to be exactly as wide as the node
  * avatar above it in the rail card. Matching widths is what makes the
  * collapsed card read as one centred badge instead of a tile with a wider bar
- * under it, and it costs nothing — the same eight cells, larger.
+ * under it.
  *
  * The geometry is fixed on purpose: the rail card keeps this block in both
  * states, so cell size, column count and gap must not depend on rail width.
@@ -302,23 +312,64 @@ export function GpuHeatGrid({ gpus }: { gpus: GpuMetric[] }) {
   if (gpus.length === 0) return null;
   const alone = gpus.length === 1;
   return (
-    <span className="grid shrink-0 grid-cols-2 auto-rows-[7px] gap-0.5">
+    <span className="grid shrink-0 grid-cols-2 auto-rows-[15px] gap-0.5">
       {gpus.map((gpu) => (
         <span
           key={gpu.index}
           title={gpuRowTitle(gpu)}
           className={cn(
-            "rounded-[2px]",
-            // A single card would otherwise be one 7px fleck in the corner of
-            // the block: let it fill the block, so a one-GPU node reads as a
-            // gauge rather than a stray square.
-            alone ? "col-span-2 row-span-4 w-4" : "size-[7px]",
-            heatTone(gpu.utilization_percent),
+            "relative overflow-hidden rounded-[2px] ring-1",
+            // A single card would otherwise be one cell in the corner of the
+            // block: let it fill the block, so a one-GPU node reads as one
+            // gauge with the whole 66px of travel.
+            alone ? "col-span-2 row-span-4 w-6" : "h-[15px] w-[11px]",
+            attentionRing(gpu),
           )}
-        />
+        >
+          <span
+            className={cn(
+              "absolute inset-x-0 bottom-0 bg-primary",
+              isBusy(gpu) ? "opacity-100" : "opacity-30",
+            )}
+            style={{ height: `${memoryPercent(gpu)}%` }}
+          />
+        </span>
       ))}
     </span>
   );
+}
+
+/** Allocated fraction of the card's memory; clamped — used can exceed total. */
+function memoryPercent(gpu: GpuMetric) {
+  const { memory_total_bytes: total, memory_used_bytes: used } = gpu;
+  if (!total || used === undefined) return 0;
+  return Math.min(100, Math.max(0, (used / total) * 100));
+}
+
+/**
+ * Whether the card is doing work rather than merely holding memory. An
+ * unsampleable utilization counts as busy: the card is holding memory, and
+ * calling that idle is an assertion the data cannot back.
+ */
+function isBusy(gpu: GpuMetric) {
+  return (
+    gpu.utilization_percent === undefined || gpu.utilization_percent >= 5
+  );
+}
+
+/**
+ * The cell's only colour channel. Two tiers on each axis — memory near full
+ * and cards running hot are both "needs handling", at a warning and at an
+ * alarm level; red and amber are the same two tones the rest of the console
+ * uses.
+ */
+function attentionRing(gpu: GpuMetric) {
+  const memory = memoryPercent(gpu);
+  const temp = gpu.temperature_c;
+  if (memory >= 97 || (temp !== undefined && temp >= 92))
+    return "ring-destructive";
+  if (memory >= 90 || (temp !== undefined && temp >= 85)) return "ring-warning";
+  return "ring-border";
 }
 
 /** The per-GPU line the compact rows used to spell out, as a cell tooltip. */
@@ -330,13 +381,6 @@ function gpuRowTitle(gpu: GpuMetric) {
     gpu.temperature_c !== undefined ? `${gpu.temperature_c}°C` : "—",
     gpu.power_watts !== undefined ? `${gpu.power_watts}W` : "—",
   ].join(" · ");
-}
-
-/** Three tiers on the same 85% line the GPU cards use. */
-function heatTone(utilization?: number) {
-  if (utilization === undefined) return "bg-muted-foreground/20";
-  if (utilization > 85) return "bg-warning";
-  return utilization <= 5 ? "bg-muted-foreground/40" : "bg-success";
 }
 
 /**
