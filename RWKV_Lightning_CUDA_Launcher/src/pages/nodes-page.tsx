@@ -263,6 +263,7 @@ function NodeDetail({ backend }: { backend: BackendView }) {
     runtime,
     gpus.map((gpu) => gpu.index),
   );
+  const smoothed = useSmoothedUtilization(metrics?.sampled_at, gpus);
 
   return (
     <Card
@@ -330,7 +331,16 @@ function NodeDetail({ backend }: { backend: BackendView }) {
                 )}
               >
                 {gpus.map((gpu) => (
-                  <GpuRow key={gpu.index} gpu={gpu} owned={owned} />
+                  <GpuRow
+                    key={gpu.index}
+                    gpu={gpu}
+                    owned={owned}
+                    idle={
+                      (smoothed(gpu.index) ??
+                        gpu.utilization_percent ??
+                        0) < IDLE_BELOW
+                    }
+                  />
                 ))}
               </div>
             </span>
@@ -356,19 +366,60 @@ function NodeDetail({ backend }: { backend: BackendView }) {
   );
 }
 
+/**
+ * Each card's utilization averaged over the last ~30 seconds, built from the
+ * samples this page already polls (metrics arrive every 6s, so five of them).
+ * One instantaneous reading is a poor "is this card working" test — a card
+ * between two batches reads as idle — and the payload carries no history, so
+ * the smoothing has to happen here.
+ */
+function useSmoothedUtilization(
+  sampledAt: number | undefined,
+  gpus: GpuMetric[],
+) {
+  const history = useRef(new Map<number, number[]>());
+  const lastSample = useRef(0);
+  useEffect(() => {
+    if (!sampledAt || sampledAt === lastSample.current) return;
+    lastSample.current = sampledAt;
+    for (const gpu of gpus) {
+      const seen = history.current.get(gpu.index) ?? [];
+      seen.push(gpu.utilization_percent ?? 0);
+      if (seen.length > 5) seen.shift();
+      history.current.set(gpu.index, seen);
+    }
+  }, [sampledAt, gpus]);
+
+  return (index: number) => {
+    const seen = history.current.get(index);
+    if (!seen?.length) return undefined;
+    return seen.reduce((sum, value) => sum + value, 0) / seen.length;
+  };
+}
+
+/** Below this a card is idle, not merely between two batches. */
+const IDLE_BELOW = 10;
+
 /** One card's row in the detail: number, memory, utilization, temperature, power. */
 function GpuRow({
   gpu,
   owned,
+  idle,
   className,
 }: {
   gpu: GpuMetric;
   owned: Set<number>;
+  /** Averaged over ~30s: one reading is a poor test of "is this card working". */
+  idle: boolean;
   className?: string;
 }) {
   const split = memorySplit(gpu, owned);
   const share = split.used > 0 ? split.own / split.used : 0;
   const temp = gpu.temperature_c;
+  // Idle rows recede as a whole — no colour needed to tell busy from idle. The
+  // one colour allowed is the card's number, and only while it is idle.
+  const number = idle ? "text-success" : "text-muted-foreground";
+  const faded = idle ? "text-muted-foreground" : "";
   return (
     <div
       className={cn(
@@ -380,7 +431,7 @@ function GpuRow({
       )}
       title={gpu.name}
     >
-      <span className="text-[11.5px] tabular-nums text-muted-foreground">
+      <span className={cn("text-[11.5px] tabular-nums", number)}>
         #{gpu.index}
       </span>
       <span className="h-[5px] overflow-hidden rounded-full bg-muted">
@@ -395,7 +446,7 @@ function GpuRow({
           {share < 1 && <span className="hatch-foreign flex-1" />}
         </span>
       </span>
-      <span className="text-right text-[11.5px] tabular-nums">
+      <span className={cn("text-right text-[11.5px] tabular-nums", faded)}>
         {gpu.utilization_percent !== undefined
           ? `${gpu.utilization_percent}%`
           : "—"}
@@ -403,12 +454,19 @@ function GpuRow({
       <span
         className={cn(
           "text-right text-[11.5px] tabular-nums",
-          temp !== undefined && temp > 85 && "text-warning",
+          // Attention outranks the idle fade: a card held hot by someone else
+          // is exactly the one worth looking at.
+          temp !== undefined && temp > 85 ? "text-warning" : faded,
         )}
       >
         {temp !== undefined ? `${temp}°C` : "—"}
       </span>
-      <span className="text-right text-[11.5px] tabular-nums text-muted-foreground">
+      <span
+        className={cn(
+          "text-right text-[11.5px] tabular-nums",
+          faded || "text-muted-foreground",
+        )}
+      >
         {gpu.power_watts !== undefined ? `${gpu.power_watts}W` : "—"}
       </span>
     </div>
