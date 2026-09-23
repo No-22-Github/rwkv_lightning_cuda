@@ -121,56 +121,40 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
             aria-label={t("backend.registered")}
             aria-haspopup="dialog"
           >
-            {/* 4px in: the avatar lands on the 24px icon column every nav icon
-                above it sits on, which also centres it over the 24px-wide heat
-                block below. */}
-            <span className="flex items-center gap-2 pl-1">
-              <NodeAvatar
-                name={backend?.name}
-                tone={status?.tone}
-                showBadge={collapsed}
-              />
-              <span
-                className={cn(
-                  "min-w-0 flex-1 truncate text-[13px] font-semibold tracking-[-0.01em] transition-opacity",
-                  collapsed && "opacity-0",
-                )}
-              >
-                {backend?.name ?? t("backend.emptyTitle")}
+            {/* The identity block: the node's tile spanning the name and the
+                service state stacked beside it, tight against each other so
+                the tile's height is exactly those two lines. */}
+            <span className="flex items-stretch gap-2">
+              <NodeAvatar name={backend?.name} tone={status?.tone} />
+              <span className="flex min-w-0 flex-1 flex-col justify-center">
+                <span
+                  className={cn(
+                    "truncate text-[13px] leading-tight font-semibold tracking-[-0.01em] transition-opacity",
+                    collapsed && "opacity-0",
+                  )}
+                >
+                  {backend?.name ?? t("backend.emptyTitle")}
+                </span>
+                <span
+                  className={cn(
+                    "truncate text-[11.5px] leading-tight text-muted-foreground transition-opacity",
+                    collapsed && "opacity-0",
+                  )}
+                >
+                  {statusLabel}
+                </span>
               </span>
               <ChevronsUpDown
                 className={cn(
-                  "size-3.5 shrink-0 text-muted-foreground transition-opacity",
+                  "size-3.5 shrink-0 self-center text-muted-foreground transition-opacity",
                   collapsed && "opacity-0",
                 )}
               />
             </span>
 
-            {/* Avatar above, heat block below, the same rows in both states.
-                The service state is the card's subtitle — its dot and its
-                words together, right under the node's name. The dot fades to
-                the avatar's corner as the rail closes (see NodeAvatar): with
-                no room for the words, a lone dot explains nothing. */}
-            <span className="mt-1.5 flex items-center gap-1.5 pl-1">
-              {status && (
-                <StatusDot
-                  tone={status.tone}
-                  className={cn(
-                    "transition-opacity duration-200",
-                    collapsed && "opacity-0",
-                  )}
-                />
-              )}
-              <span
-                className={cn(
-                  "min-w-0 flex-1 truncate text-[11.5px] text-muted-foreground transition-opacity",
-                  collapsed && "opacity-0",
-                )}
-              >
-                {statusLabel}
-              </span>
-            </span>
-
+            {/* The heat block, with the numbers a per-cell colour cannot
+                show. Same rows in both states: the collapse cuts the right
+                side off, it does not take a row away. */}
             <span className="mt-2 flex items-center gap-2">
               {gpus.length > 0 ? (
                 <GpuHeatGrid gpus={gpus} owned={owned} />
@@ -312,37 +296,27 @@ export function NodeCard({ collapsed }: { collapsed: boolean }) {
 }
 
 /**
- * The node's identity in one glyph: its initial in a tile, sized like the nav
- * icons above. While the rail is collapsed the service state has no words to
- * sit next to, so its dot rides on this tile's corner instead — the two fade
- * through each other as the rail opens, which is how one dot reads as moving
- * between its label and the node's icon.
+ * The node's identity in one glyph: its initial in a tile. It stretches to
+ * the height of the name and the service state beside it, so the tile reads
+ * as one block with the two lines rather than as a 16px square floating in
+ * front of them — and its width matches the heat block below. The status dot
+ * rides this tile's corner in both rail states: it belongs to the node, and
+ * while the rail is closed it is the only thing that carries the tone.
  */
-function NodeAvatar({
-  name,
-  tone,
-  showBadge,
-}: {
-  name?: string;
-  tone?: StatusTone;
-  showBadge?: boolean;
-}) {
+function NodeAvatar({ name, tone }: { name?: string; tone?: StatusTone }) {
   return (
-    <span className="relative shrink-0">
-      <span className="flex size-4 items-center justify-center rounded-[5px] bg-muted text-[9.5px] font-semibold text-muted-foreground">
+    <span className="relative w-6 shrink-0">
+      <span className="flex h-full min-h-6 w-full items-center justify-center rounded-lg bg-muted text-[12px] font-semibold text-muted-foreground">
         {name ? (
           name.trim().slice(0, 1).toUpperCase()
         ) : (
-          <Server className="size-2.5" />
+          <Server className="size-3.5" />
         )}
       </span>
       {tone && (
         <StatusDot
           tone={tone}
-          className={cn(
-            "absolute -top-1 -right-1 ring-2 ring-background transition-opacity duration-200",
-            showBadge ? "opacity-100" : "opacity-0",
-          )}
+          className="absolute -top-1 -right-1 ring-2 ring-background"
         />
       )}
     </span>
