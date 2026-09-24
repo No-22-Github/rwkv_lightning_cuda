@@ -135,15 +135,35 @@ jobs:
           sudo apt-get install -y ninja-build pkg-config zip unzip autoconf automake libtool
       # Install only what the build uses instead of the full toolkit: the full
       # Windows installer alone took ~10 minutes. curand_dev is for the
-      # curand_kernel.h device header and thrust/cccl for <cuda/pipeline>.
+      # curand_kernel.h device header, thrust/cccl for <cuda/pipeline> and the
+      # profiler API for tools/calibration.
       # On Linux apt tracks the newest patch of the requested major.minor.
-      - name: Install CUDA Toolkit (Windows)
+      # The slim Windows install still takes ~5 minutes, so keep the installed
+      # tree. Nothing else the build needs lives outside it (Ninja does not use
+      # the Visual Studio integration). Bump the key suffix when changing the
+      # sub-packages below.
+      - name: Cache CUDA Toolkit (Windows)
         if: runner.os == 'Windows'
+        id: cuda-cache
+        uses: actions/cache@v4
+        with:
+          path: C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA
+          key: cuda-windows-${{ matrix.cuda }}-pkgs2
+      - name: Use cached CUDA Toolkit (Windows)
+        if: runner.os == 'Windows' && steps.cuda-cache.outputs.cache-hit == 'true'
+        shell: pwsh
+        run: |
+          $dir = (Get-ChildItem 'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA' -Directory | Select-Object -First 1).FullName
+          "CUDA_PATH=$dir" >> $env:GITHUB_ENV
+          "$dir\bin" >> $env:GITHUB_PATH
+          & "$dir\bin\nvcc.exe" --version
+      - name: Install CUDA Toolkit (Windows)
+        if: runner.os == 'Windows' && steps.cuda-cache.outputs.cache-hit != 'true'
         uses: Jimver/cuda-toolkit@b8bf9c6c28f8a92fbb04dcfcaee872e60c57462d # v0.2.36
         with:
           cuda: ${{ matrix.cuda }}
           method: network
-          sub-packages: '["nvcc","cudart","cublas","cublas_dev","curand_dev","thrust","visual_studio_integration"${{ matrix.cuda-split-packages }}]'
+          sub-packages: '["nvcc","cudart","cublas","cublas_dev","curand_dev","cuda_profiler_api","thrust","visual_studio_integration"${{ matrix.cuda-split-packages }}]'
           use-github-cache: false
           log-file-suffix: ${{ matrix.os }}-${{ matrix.cuda }}.txt
       - name: Install CUDA Toolkit (Linux)
@@ -152,7 +172,7 @@ jobs:
         with:
           cuda: ${{ matrix.cuda }}
           method: network
-          sub-packages: '["nvcc","cudart-dev","cccl"]'
+          sub-packages: '["nvcc","cudart-dev","cccl","profiler-api"]'
           non-cuda-sub-packages: '["libcublas-dev","libcurand-dev"]'
           log-file-suffix: ${{ matrix.os }}-${{ matrix.cuda }}.txt
       - name: Set up sccache
