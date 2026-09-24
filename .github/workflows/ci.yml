@@ -184,13 +184,31 @@ jobs:
           ref: ef7dbf94b9198bc58f45951adcf1f041fcbc5ea0 # 2025.06.13
           path: third_party/vcpkg
           persist-credentials: false
-      - name: Cache C++ dependencies
-        uses: actions/cache@v4
+      # vcpkg's package ABI includes the compiler version, which changes as the
+      # runner image rolls. Restore by prefix and save under a hash of the cache
+      # contents, so newly built packages get stored instead of being rebuilt
+      # on every run once the old key goes stale.
+      - name: Restore C++ dependencies
+        id: vcpkg-cache
+        uses: actions/cache/restore@v4
         with:
           path: .vcpkg-cache
-          key: vcpkg-${{ matrix.os }}-2025.06.13-${{ hashFiles('tools/ci/vcpkg.json') }}
+          # Never saved: always falls through to the newest content-keyed entry.
+          key: vcpkg-${{ matrix.os }}-2025.06.13-${{ hashFiles('tools/ci/vcpkg.json') }}-latest
+          restore-keys: |
+            vcpkg-${{ matrix.os }}-2025.06.13-${{ hashFiles('tools/ci/vcpkg.json') }}-
+            vcpkg-${{ matrix.os }}-2025.06.13-${{ hashFiles('tools/ci/vcpkg.json') }}
       - name: Build, test and package
         run: python tools/ci/build_release.py
+      - name: Save C++ dependencies
+        if: >-
+          success() && hashFiles('.vcpkg-cache/**') != '' &&
+          steps.vcpkg-cache.outputs.cache-matched-key != format('vcpkg-{0}-2025.06.13-{1}-{2}',
+            matrix.os, hashFiles('tools/ci/vcpkg.json'), hashFiles('.vcpkg-cache/**'))
+        uses: actions/cache/save@v4
+        with:
+          path: .vcpkg-cache
+          key: vcpkg-${{ matrix.os }}-2025.06.13-${{ hashFiles('tools/ci/vcpkg.json') }}-${{ hashFiles('.vcpkg-cache/**') }}
       - name: Show sccache stats
         if: always()
         shell: bash
