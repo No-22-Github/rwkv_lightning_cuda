@@ -145,7 +145,7 @@ Client 与 Agent **必须同版本部署**。曾经存在的旧协议适配层�
 ```json
 {
   "role": "agent",
-  "version": "1.7.6",
+  "version": "1.7.7",
   "capabilities": ["runtime", "tuning_state", "tuning_miss", "quantization", "metrics", "fs", "state_import", "host_dialog"],
   "available": true,
   "visible_devices": "",
