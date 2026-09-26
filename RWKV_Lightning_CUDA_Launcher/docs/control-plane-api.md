@@ -45,22 +45,24 @@ Runtime / Tuning / Quantization 请求体集中定义在 `request_types.go`，�
 
 命名判据：**能被 OpenAI SDK 或第三方客户端调的，留 `/v1`；只有我们自己 WebUI 调的，进 `/api/v1`。**
 
+表中最后一列只用于迁移对照：pre-v1 路径已全部删除，没有 alias，请求它们会得到 404。
+
 ### 节点（Agent）
 
-| 方法 | 路径 | 作用 | 旧路径 |
+| 方法 | 路径 | 作用 | 对应的 pre-v1 路径（均已移除） |
 | --- | --- | --- | --- |
-| GET | `/api/v1/node` | role / version / capabilities / runtime 概况 | 已移除 |
-| GET | `/api/v1/node/metrics` | GPU 指标 | 新增 |
-| POST | `/api/v1/node/fs` | 目录浏览（白名单内） | 新增 |
-| POST | `/api/v1/node/dialog/file` | 宿主机原生文件选择器 | 已移除 |
-| POST | `/api/v1/node/dialog/directory` | 宿主机原生目录选择器 | 已移除 |
-| POST | `/api/v1/node/dialog/reveal` | 在宿主机打开 checkpoint 目录 | 已移除 |
+| GET | `/api/v1/node` | role / version / capabilities / runtime 概况 | — |
+| GET | `/api/v1/node/metrics` | GPU 指标 | —（v1 新增） |
+| POST | `/api/v1/node/fs` | 目录浏览（白名单内） | —（v1 新增） |
+| POST | `/api/v1/node/dialog/file` | 宿主机原生文件选择器 | `/api/pick-file` |
+| POST | `/api/v1/node/dialog/directory` | 宿主机原生目录选择器 | `/api/pick-directory` |
+| POST | `/api/v1/node/dialog/reveal` | 在宿主机打开 checkpoint 目录 | `/api/tuning/open-folder` |
 
 三个 `dialog/*` 仅在 Agent 角色 + loopback 来源下可用；Client 形态或远程调用返回 `400 {"error":"unsupported","reason":"host-local only"}`。能力位 `host_dialog` 只在本机全套形态出现。
 
 ### 推理服务进程（Agent）
 
-| 方法 | 路径 | 作用 | 旧路径 |
+| 方法 | 路径 | 作用 | 对应的 pre-v1 路径（均已移除） |
 | --- | --- | --- | --- |
 | GET | `/api/v1/runtime` | runtime 状态 + 配置 | `/api/status`（拆分） |
 | POST | `/api/v1/runtime/start` | 启动，body = RuntimeConfig | `/api/start` |
@@ -68,13 +70,13 @@ Runtime / Tuning / Quantization 请求体集中定义在 `request_types.go`，�
 | POST | `/api/v1/runtime/restart` | 用实际运行配置重启 | `/api/restart` |
 | POST | `/api/v1/runtime/load` | 选卡（重）加载：停止 → 以 `visible_devices` 重启 → 等就绪 →（动态模式）加载模型 | — |
 | POST | `/api/v1/runtime/state/import` | 把节点本地 `.pth` 交给推理服务的 multipart `/v1/state/upload` | — |
-| GET | `/api/v1/runtime/logs` | SSE 日志流 | 已移除 |
+| GET | `/api/v1/runtime/logs` | SSE 日志流 | `/logs` |
 
 ### 任务（Agent）
 
 训练与量化在 Go 里本就是同一个 `*process`、同一份 `ProcessStatus` schema，合并为 jobs 只是把既有事实写进路径。**`{id}` 是固定值 `tuning` / `quantization`，不是自增 id**；语义仍是单例，不引入任务队列。
 
-| 方法 | 路径 | 作用 | 旧路径 |
+| 方法 | 路径 | 作用 | 对应的 pre-v1 路径（均已移除） |
 | --- | --- | --- | --- |
 | GET | `/api/v1/jobs` | `{"jobs":{"tuning":…,"quantization":…}}` | — |
 | GET | `/api/v1/jobs/{id}` | 单个任务状态 | `/api/tuning/status` · `/api/quantization/status` |
@@ -90,12 +92,14 @@ Runtime / Tuning / Quantization 请求体集中定义在 `request_types.go`，�
 | --- | --- | --- |
 | GET | `/api/v1/backends` | 列出已注册后端（不含 token，只回 `has_token`） |
 | POST | `/api/v1/backends` | 添加，body = `{name, base_url, token}`；添加时同步探测一次 |
+| PATCH | `/api/v1/backends/{id}` | 编辑，body = `{name?, base_url?, token?}` 的任意子集；编辑后重新探测 |
 | DELETE | `/api/v1/backends/{id}` | 移除 |
 | POST | `/api/v1/backends/{id}/probe` | 重新探测能力 |
 
 - `base_url` 不带 `/v1`/`/api` 后缀；带后缀的请求被拒绝。
 - `id` 由 Client 生成（6 位十六进制随机串），不用 base_url 做 id。`local` 固定保留给本机全套形态的本地 runtime，不可删除。
-- 注册表落盘 `{"backends":[{id,name,base_url,token}]}`，文件 0600；**任何响应都不回显 token**。先写入独立临时文件并同步、替换成功后才更新内存；失败返回错误，添加/删除不会假报成功，原节点和探测状态保留。
+- 注册表落盘 `{"backends":[{id,name,base_url,token}]}`，文件 0600；**任何响应都不回显 token**。先写入独立临时文件并同步、替换成功后才更新内存；失败返回错误，添加/编辑/删除不会假报成功，原节点和探测状态保留。
+- 编辑（PATCH）只改 body 里出现的字段，`id` 不可改，所以编辑不会让前端丢失当前选中的节点。`token` 为空串表示**保留原 token**（浏览器从不拿到 token，未动过的密码框不能表示「清空」）。`base_url` 走与添加相同的校验；改地址或 token 后立即重新探测。`local` 不可编辑。
 
 ### 转发层（Client）
 
@@ -159,7 +163,7 @@ Client 与 Agent **必须同版本部署**。曾经存在的旧协议适配层�
 - `card`：Agent 启动参数 `--card` 的原值，未指定时为 `""`。它是硬性钉定而不是默认值：显式指定其他选卡（包括空串「不注入」）的启动/加载请求会被 400 拒绝（§选卡）。
 - `version` 来自构建时的 `-ldflags "-X main.launcherVersion=…"`；本地构建为 `dev`。
 
-Client 形态下 `/api/v1/node` 返回 404（`{"error":"client_only", …}`），避免探测者把 Client 误判为 Agent；旧 `/api/status` 仍返回 200 + `role:"client"` 标记，保证老 WebUI 可渲染。
+Client 形态下 `/api/v1/node` 返回 404（`{"error":"client_only", …}`），避免探测者把 Client 误判为 Agent。
 
 ### `GET /api/v1/backends`（Client）
 
@@ -196,6 +200,7 @@ Client 形态下 `/api/v1/node` 返回 404（`{"error":"client_only", …}`）�
       "name": "NVIDIA GeForce RTX 4060 Ti",
       "memory_total_bytes": 17179869184,
       "memory_used_bytes": 13421772800,
+      "own_memory_bytes": 12884901888,
       "utilization_percent": 94,
       "temperature_c": 71,
       "power_watts": 158
@@ -207,12 +212,13 @@ Client 形态下 `/api/v1/node` 返回 404（`{"error":"client_only", …}`）�
 - NVIDIA 走 NVML（cgo dlopen `libnvidia-ml.so.1`，运行时解析，不需要构建期 CUDA toolkit）；AMD 走 `rocm-smi --json`（1 秒 TTL 缓存）。都不 fork `nvidia-smi`。
 - `index` 是 NVML 物理索引。CUDA_VISIBLE_DEVICES 会重映射子进程内的逻辑索引，两者不混用：逻辑设备号只出现在子进程日志里，不改写。
 - `temperature_c` / `power_watts` 是可选字段：取不到就整个字段不出现，不许填 0 或 -1。
+- `own_memory_bytes`（可选）是本 Agent 管理的 runtime 在这张卡上占用的显存：NVML 按进程统计显存，Agent 把 runtime 主进程及其全部子孙进程（按 `/proc` 父进程链判断）的占用相加。只有 NVML 路径提供；`rocm-smi` 无法按进程归属，非 Linux-cgo 构建没有 NVML，二者都**省略**该字段；本 Agent 的 runtime 没在运行时同样省略。取值不超过 `memory_used_bytes`。前端据此把显存条画成两段：自己的在底部，其他进程的叠在上面并打斜线；字段缺失时退回按 `visible_devices` 整卡归属。
 - 取不到任何采样时返回 `{"available": false, "vendor": "unknown", "reason": "nvml: …; rocm-smi: not found in PATH", "gpus": []}`——不许返回全 0 的 gpus 数组。
 - Linux 上以 `CGO_ENABLED=0` 构建的 launcher 没有 NVML 支持（metrics 返回 available=false）；发布包在 Linux 上以 `CGO_ENABLED=1` 构建以启用 NVML。Windows 构建暂无 NVML 路径（后续可经 `syscall.NewLazyDLL` 增加，未列入本轮）。
 
 ### 选卡 `visible_devices`（三个请求体的可选字段）
 
-`RuntimeConfig`（`/api/v1/runtime/start`、`/api/start`）、`TuningConfig`（`/api/v1/jobs/tuning`、`/api/tuning/start`）、`QuantizationConfig`（`/api/v1/jobs/quantization`、`/api/quantization/start`）各增加可选字段：
+`RuntimeConfig`（`/api/v1/runtime/start`、`/api/v1/runtime/load`）、`TuningConfig`（`/api/v1/jobs/tuning`）、`QuantizationConfig`（`/api/v1/jobs/quantization`）各增加可选字段：
 
 ```json
 { "visible_devices": "0,1" }
@@ -473,6 +479,7 @@ type RuntimeState = ProcessStatus & {
 | --- | --- | --- |
 | `GET /api/v1/backends` | 无 | `{"backends":[BackendView,...]}` |
 | `POST /api/v1/backends` | `{"name":"...","base_url":"http://host:18766","token":"..."}` | 单个 BackendView，HTTP 200 |
+| `PATCH /api/v1/backends/{id}` | `{"name":"...","base_url":"...","token":"..."}` 的任意子集；`token:""` = 保留原值 | 单个 BackendView（已重新探测），HTTP 200 |
 | `DELETE /api/v1/backends/{id}` | 无 | `{"ok":true}` |
 | `POST /api/v1/backends/{id}/probe` | 无 | 单个 BackendView，HTTP 200 |
 | `POST /api/v1/node/fs` | `{}` 或 `{"path":""}` | `{"roots":["/data",...],"default":"/app/dir"}` |

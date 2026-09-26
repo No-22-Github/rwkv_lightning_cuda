@@ -75,7 +75,7 @@ rwkv_launcher --client                         # 控制台：仅 Client（本机
 
 字体同理：Geist 与 JetBrains Mono 以 `@fontsource-variable/*` 依赖形式安装，构建时产出 latin subset 的 variable woff2 到 `dist/assets/`，源码树与仓库里都不存放字体文件。二者自托管而非引 CDN，内网与离线机器上的观感才和设计稿一致。
 
-路由使用 `/#/chat`、`/#/translate`、`/#/state-tuning`、`/#/runtime`、`/#/settings`，无需服务端 SPA fallback。不要用 `file://` 打开 `dist/index.html`。
+路由使用 `/#/nodes`、`/#/chat`、`/#/translate`、`/#/runtime`、`/#/training`、`/#/quant`、`/#/settings`（旧链接 `/#/state-tuning`、`/#/quantization` 仍会跳到对应页面），无需服务端 SPA fallback。不要用 `file://` 打开 `dist/index.html`。
 
 ### 开发
 
@@ -85,18 +85,20 @@ rwkv_launcher --client                         # 控制台：仅 Client（本机
 bun run dev
 ```
 
-Vite 将 `/api` 和 `/v1` 转发到 `127.0.0.1:10721`。生产流量直接走 Go，没有 Node 中间层。`go run .` 的临时可执行目录不包含原生二进制，不适合验证本地进程启动。
+Vite 将 `/api` 和 `/v1` 转发到 `127.0.0.1:10721`，并把请求的 `Origin` 改写成 Launcher 地址（Launcher 拒绝外来 Origin）。生产流量直接走 Go，没有 Node 中间层。`go run .` 的临时可执行目录不包含原生二进制，不适合验证本地进程启动。
 
 ## 使用
 
-- **节点总览**：注册表里的每个后端的可达性、runtime 状态、已加载模型与运行中任务；可逐个或全部重新探测、切换当前节点、移除节点（`local` 保留）。切换节点后所有页面跟随该节点。
+- **节点总览**：注册表里每个后端的可达性、推理 / 训练 / 量化进程状态、GPU 占用与运行中任务；可逐个或全部重新探测、切换当前节点、从详情面板的 ⋯ 菜单编辑（名字、地址、token）或移除节点（`local` 保留）。切换节点后所有页面跟随该节点。
+- **侧栏节点卡片**：常驻在侧栏底部，显示当前节点的推理服务状态、利用率与显存，以及 GPU 热力格（高度是显存、深浅是利用率、斜线是其他进程占用的显存）；点开可切换节点或添加后端。侧栏可折叠。
 - **Runtime**：输入真实模型和词表路径，可浏览远端白名单目录，宿主机对话框仅在节点宣告 `host_dialog` 时出现。Start 使用当前表单；Restart 使用实际运行配置。配置修改在下次 Stop → Start 后生效。
 - 选卡是三态字符串：缺省沿用 Agent `--card` / 继承环境、空串显式不注入、显式值如 `0,1`；Runtime / 训练 / 量化共用同一控件。
 - 动态加载时，模型路径必须为目录。启动服务后，在模型列表中选择并 Load，再开始 Chat / Translate。Ready 表示 HTTP 服务已就绪，模型是否加载另行判断。
-- **Chat**：真实 SSE 增量输出，支持 Markdown、代码高亮、表格、Stop、重新生成、HTML 预览。会话按 backend ID 隔离；停止或网络中断保留部分输出。
-- **Parallel Translate**：按非空行生成原始续写任务，直接调用 `/v1/batch/completions`，每批 1–128 行非流式执行并按 `choices[].index` 合并。支持停止、重试失败行与待执行行。结果记录所属节点，切换节点不会串结果。
-- 语言名允许自定义，未知值回退默认。Copy / TXT / Markdown 可导出结果；未完成块以 `···` 占位。
-- **State Tuning**：通过真实 CLI 训练，JSONL 每行必须恰好为一个字符串 `text` 字段。验证在 Go 宿主机执行，拒绝额外/重复字段。显示 stdout / stderr、真实 step / epoch / loss / LR / tokens/s / ETA、loss 曲线和实际保存的 checkpoint 路径。
+- **Chat**：真实 SSE 增量输出，支持 Markdown、代码高亮、表格、Stop、重新生成、HTML 预览。思考开关为「自动 / 关 / 开」三档。右侧生成参数面板调整 temperature / top_p / top_k / max_tokens 与重复惩罚，并选择 State 与 MiSS adapter。会话按 backend ID 隔离；停止或网络中断保留部分输出。
+- **并行翻译**：按非空行生成原始续写任务，直接调用 `/v1/batch/completions`，每批 1–128 行非流式执行并按 `choices[].index` 合并。任务栏放语言、batch 与开始 / 停止，不能开始时直接写明原因；译文逐行显示状态（等待 / 进行中 / 完成 / 失败），失败行显示错误原因，可重试失败行、继续被停止的剩余行。结果记录所属节点，切换节点不会串结果。
+- 语言名允许自定义，未知值回退默认。复制 / TXT / Markdown 导出已完成的行。
+- **State / MiSS 训练**：通过真实 CLI 训练，JSONL 每行必须恰好为一个字符串 `text` 字段；「校验数据集」在 Go 宿主机执行，拒绝额外/重复字段。参数分组并提供「推荐 / 低显存 / 试跑」预设。进度卡显示真实 step / epoch / loss / LR / tokens/s / ETA、可切换并平滑的 loss / lr / tok/s 曲线和实际保存的 checkpoint 路径；进程输出在日志抽屉里查看。
+- **量化**：把 BF16 `.pth` 转成 `.rwkvq`（w4a16，group 128 / 32；或 w8a16），输出路径按输入自动推导。在节点 CPU 上运行，不占显卡；显示进度与输出文件。
 - **Appearance**：默认跟随系统外观（System），Settings 中可显式选择 Dark / Light / System，以及中文 / English 切换。System 会跟随操作系统并在系统外观变化时即时更新，选择会保存在本地，页面加载前即应用以避免主题闪烁。
 - **Settings**：外观与语言、当前节点与 Agent token、翻译默认语言与 batch size，以及清除本机数据。远端 token 由本机 Client 注入，浏览器不持久化。
 
@@ -110,14 +112,17 @@ Vite 将 `/api` 和 `/v1` 转发到 `127.0.0.1:10721`。生产流量直接走 Go
 
 ### Chat 初始化 state 与思考
 
-Chat 输入框的 State 按钮可以上传 `.pth`、刷新和查看服务端 state 列表（ID、大小、tensor 数和上传时间）、选择初始 state，以及确认删除。上传成功后自动选中，删除当前选中的 state 后恢复默认初始化。请求携带所选 `state_id`，服务端从该 state 初始化，再处理完整会话历史。state 属于当前服务进程，重启后需要重新上传。
+Chat 右侧生成参数面板的 State「管理」可以上传 `.pth`、刷新和查看服务端 state 列表（ID、大小、tensor 数和上传时间）、选择初始 state，以及确认删除。上传成功后自动选中，删除当前选中的 state 后恢复默认初始化。请求携带所选 `state_id`，服务端从该 state 初始化，再处理完整会话历史。state 属于当前服务进程，重启后需要重新上传。
 
-Chat 仍调用 `/v1/chat/completions`，服务端内部执行 batch 生成。默认 `think_type=fast`，输入框 Thinking 开关开启后使用 `free`，实际单轮格式如下（末尾故意不补 `>`）：
+Chat 仍调用 `/v1/chat/completions`，服务端内部执行 batch 生成。输入框的思考开关有三档，默认「关」，实际单轮格式如下（末尾故意不补 `>`）：
 
 ```text
-快思考：User: {用户输入}\n\nAssistant: <think></think
-启用思考：User: {用户输入}\n\nAssistant: <think
+关（think_type=fast）：User: {用户输入}\n\nAssistant: <think></think
+开（think_type=free）：User: {用户输入}\n\nAssistant: <think
+自动（think_type=none）：User: {用户输入}\n\nAssistant:
 ```
+
+「自动」不预填思考前缀，由模型自己决定是否思考。选了 state 时建议用「自动」匹配 state 的训练格式，输入框下方会给出提示和一键切换。
 
 ### 原始翻译续写
 
@@ -174,16 +179,16 @@ State tuning 使用 `.pth` 基础模型，最终张量结构由原生加载器�
 恢复时选择 `checkpoint-N` 目录，保持原模型、数据与训练配置，并选择新的输出目录。
 周期保存仍为 `checkpoint-N/{checkpoint.json,training.pth}`；结束生成单个 `adapter-final.pth`。
 
-在 Chat 的 **MiSS** 按钮、Parallel Translate 的 MiSS 面板或 Settings 的 **MiSS adapters** 面板中：
+在 Chat 右侧生成参数面板的 **MiSS adapter**「管理」中：
 
 - 选择最终 PTH 或新 checkpoint 的 `training.pth` 后立即上传并用于新请求；adapter ID 可选，留空时使用去掉 `.pth` 的文件名。旧 checkpoint 可先附带 `checkpoint.json`。
 - 也可填写服务器已有文件的绝对路径注册。
 - 注册只缓存 D 到服务器 RAM；首次调用才装入 GPU。
 - 选择具体内容版本，并按需覆盖 scale；留空使用默认值，0 保留为显式零。
-- Chat 和 Parallel Translate 的新请求均携带所选 `adapter_id/adapter_version/adapter_scale`；运行中的请求不受切换影响。
+- 所选 adapter 是全局生成设置：Chat 和并行翻译的新请求都携带 `adapter_id/adapter_version/adapter_scale`；运行中的请求不受切换影响。
 - 可刷新列表、删除指定版本和查看 RAM/GPU 驻留量及 H2D 次数。服务器重启后需重新注册。
 
-管理本地 runtime 时，Go 自动透传其鉴权信息；连接远程服务器时使用 Settings 中的 API key。
+管理本地 runtime 时，Go 自动透传其鉴权信息；远程节点使用添加 / 编辑后端时填写的 Agent token，由本机 Client 注入，浏览器不保存。
 
 两个原生程序各自申请 GPU，没有跨进程资源协调；仓库没有规定必须互斥。本 Launcher 按显卡判断训练与推理互斥：设备集有交集或不可判定时拒绝同时启动，显式选择无交集设备时允许并行。WebUI 已在 Runtime / 训练 / 量化三处接入 `visible_devices`；Go 侧仍执行最终检查。不会停止 Launcher 之外的 GPU 进程。Stop 会终止训练，保留此前实际写出的 checkpoint，不声称已保存尚未落盘的更新。
 
@@ -193,7 +198,7 @@ WebUI 使用 [新控制面 API](docs/control-plane-api.md)：浏览器只与本�
 
 控制面接口的完整路径表、schema 与安全模型见 [docs/control-plane-api.md](docs/control-plane-api.md)。所有 POST 都发送 JSON，失败返回实际 `{"error":"..."}` 与 HTTP 错误码。
 
-新控制面（`/api/v1`）：`/api/v1/node`、`/api/v1/node/metrics`、`/api/v1/node/fs`、`/api/v1/node/dialog/{file,directory,reveal}`、`/api/v1/runtime`（+ `start/stop/restart/load/state/import/logs`）、`/api/v1/jobs`（+ `/{id}`、`/tuning`、`/tuning/validate`、`/quantization`、`/{id}/stop`、`/{id}/logs`）、`/api/v1/backends`（Client：增删查 + `/{id}/probe` + `/{id}/api/v1/*`、`/{id}/v1/*` 转发）。
+新控制面（`/api/v1`）：`/api/v1/node`、`/api/v1/node/metrics`、`/api/v1/node/fs`、`/api/v1/node/dialog/{file,directory,reveal}`、`/api/v1/runtime`（+ `start/stop/restart/load/state/import/logs`）、`/api/v1/jobs`（+ `/{id}`、`/tuning`、`/tuning/validate`、`/quantization`、`/{id}/stop`、`/{id}/logs`）、`/api/v1/backends`（Client：增删改查 + `/{id}/probe` + `/{id}/api/v1/*`、`/{id}/v1/*` 转发）。
 
 **没有旧路径 alias。** `/api/v1` 是唯一的控制面。pre-v1 的 `/api/status`、
 `/api/start`、`/api/stop`、`/api/restart`、`/api/tuning/*`、

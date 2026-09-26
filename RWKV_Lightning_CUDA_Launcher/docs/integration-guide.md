@@ -72,7 +72,15 @@ curl -sS "$BACKEND_URL/api/v1/runtime"
 curl -sS "$BACKEND_URL/api/v1/node/metrics"
 ```
 
-本机全套形态可使用保留 ID `local`；纯 Client 没有 `local`。当前没有 PATCH/PUT 编辑后端接口：修改地址、名字或 token，需要删除再添加，ID 会变化。
+本机全套形态可使用保留 ID `local`；纯 Client 没有 `local`。
+
+修改名字、地址或 token 用 `PATCH`，只传要改的字段；ID 不变，改完会自动重新探测。`token` 传空串表示保留原值，`local` 不可编辑：
+
+```bash
+curl -sS -X PATCH "$CLIENT_URL/api/v1/backends/$BACKEND_ID" \
+  -H 'Content-Type: application/json' \
+  -d '{"base_url":"http://10.0.0.8:18766","token":"new-token"}'
+```
 
 ### 启动与停止推理
 
